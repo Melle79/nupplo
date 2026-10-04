@@ -1,5 +1,21 @@
 # Changelog
 
+## 3.4.4 – Oktober 2026
+
+### Behoben
+- 🎨 **„rote Beine" findet jetzt, was der Name sagt.** Die Farbsuche schaute
+  bisher nur in die Farbliste der Bildanalyse. Nannte der BrickLink-Name
+  „… Red Legs", fehlte Rot aber in der Liste, fiel die Figur heraus – und
+  umgekehrt kam „Red Torso, Blue Legs" herein, weil Rot irgendwo stand.
+  Jetzt liest die App aus dem Namen, welches Teil welche Farbe hat
+  (`backend/namensfarben.py`): Fragt jemand nach einem Teil, entscheidet
+  der Name; ohne Teil holt er eine Figur nur noch herein, hinter die
+  Treffer der Farbliste („roter Droide" bleibt R-3PO).
+- Gelesen wird nur „<Farbe> <Teil>" – Details wie „Short Red Stripes"
+  machen weiter keinen roten Droiden. Und es bleibt **lokal**: Die Namen
+  holt jede Instanz über ihren eigenen BrickLink-Zugang, weitergegeben
+  wird nichts.
+
 ## 3.4.3 – Oktober 2026
 
 ### Geändert

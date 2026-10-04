@@ -28,6 +28,7 @@ import core
 import crypto_box
 import hub
 import integrations
+import namensfarben
 import push
 import totp
 import themes
@@ -4637,17 +4638,40 @@ def _farbrang(begriff: str, name: str, farben: str):
 
     `None` heißt: Die Farbe steht nicht in der Liste – kein Treffer.
     """
-    gesucht = [w for w in _such_woerter(begriff) if w in FARBWOERTER]
+    woerter = _such_woerter(begriff)
+    gesucht = [w for w in woerter if w in FARBWOERTER]
     if not gesucht:
         return 0
     liste = [x for x in re.split(r"[^a-z0-9]+", (farben or "").lower()) if x]
-    if not liste:
-        return None
+    # **Was der Name Teil für Teil sagt, ist Katalogwahrheit** – und kein
+    # Detail wie „Short Red Stripes", denn gelesen wird nur „<Farbe>
+    # <Teil>". Bis 3.4.3 zählte hier allein die Farbliste: Eine Figur mit
+    # „Red Legs" im Namen fiel bei „rote Beine" heraus, wenn das Sehmodell
+    # Rot nicht in seiner Zusammenfassung hatte. Umgekehrt kam „Red Torso,
+    # Blue Legs" herein, weil Rot irgendwo stand (04.10.2026).
+    namen = namensfarben.teilfarben(name)
+    teile = namensfarben.teile_in(woerter)
     rang = 0
     for f in gesucht:
-        if f not in liste:
+        # Fragt jemand nach einem Teil, und der Name nennt **dieses** Teil
+        # in einer anderen Farbe, ist es nicht die gesuchte Figur – gleich,
+        # was die Farbliste sagt.
+        if any(t in namen and f not in namen[t].split() for t in teile):
             return None
-        rang += liste.index(f) * 10 + len(liste)
+        im_namen = {t for t, c in namen.items() if f in c.split()}
+        if teile & im_namen:
+            continue        # Rang 0: genau das gefragte Teil, laut Katalog
+        if f in liste:
+            rang += liste.index(f) * 10 + len(liste)
+        elif im_namen:
+            # **Ohne gefragtes Teil zählt, was die ganze Figur ausmacht.**
+            # Ein Droide mit „Dark Red Torso" ist nicht der rote Droide,
+            # den jeder meint – das ist `R-3PO` mit `farben=red` (Test
+            # `test_wer_die_farbe_ausmacht_steht_vorn`). Hereingelassen
+            # wird er trotzdem, aber hinter jede Zusammenfassung.
+            rang += 1000
+        else:
+            return None
     return rang
 
 
