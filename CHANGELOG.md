@@ -1,5 +1,17 @@
 # Changelog
 
+## 3.6.0 – Oktober 2026
+
+### Neu
+- 🚫 **Zur Sperre selbst Stellung nehmen.** Im Kasten „Zugang gesperrt“
+  stand bisher nur, dass und warum gesperrt ist – widersprechen ließ sich
+  nicht. Jetzt steht darunter „Stellung nehmen“ (bis 2000 Zeichen, nur der
+  Hub-Admin liest es; erneutes Senden ersetzt die frühere Stellungnahme).
+- 🚫 **Auch ohne Mitgliedskonto.** Lehnt der Hub schon den Beitritt ab, weil
+  die Installation gesperrt ist, sagt das jetzt *Mehr → Tausch-Netzwerk*
+  samt Grund – und bietet dieselbe Stellungnahme an. Dann spricht die
+  Installation mit ihrer Kennung statt mit einem Konto. Braucht Hub 1.26.0.
+
 ## 3.5.0 – Oktober 2026
 
 ### Neu

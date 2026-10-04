@@ -1085,3 +1085,66 @@ def test_mitteilungen_lesen_hebt_die_sperre_nicht_auf(client, monkeypatch):
         200, {"ok": True, "reply_at": 5}))
     client.post("/api/hub/hinweise/3/stellungnahme", json={"text": "Hallo"})
     assert hub.blocked() is True
+
+
+# ------------------------------------- Stellungnahme zur Sperre (Hub 1.26.0)
+
+def test_gesperrtes_mitglied_nimmt_zur_sperre_stellung(client, monkeypatch):
+    """04.10.2026: Der Kasten „Zugang gesperrt“ ließ keine Gegenrede zu."""
+    core.set_setting("hub_token", "bft_x")
+    core.set_setting("hub_blocked", "1")
+    aufrufe = []
+    def antwort(method, url, **k):
+        aufrufe.append((method, url.split("workers.dev")[-1], k.get("json")))
+        if method == "GET":
+            return _Resp(200, {"sperre": {"id": 9, "kind": "sperre",
+                                          "reply_text": None}})
+        return _Resp(200, {"ok": True, "notice_id": 9, "reply_at": 7})
+    monkeypatch.setattr(hub.requests, "request", antwort)
+    assert client.get("/api/hub/sperre").json()["sperre"]["id"] == 9
+    r = client.post("/api/hub/sperre/stellungnahme", json={"text": " Bitte prüfen. "})
+    assert r.status_code == 200 and r.json()["reply_at"] == 7
+    assert aufrufe[-1][1].endswith("/v1/sperre/stellungnahme")
+    assert aufrufe[-1][2] == {"text": "Bitte prüfen."}
+    assert hub.blocked() is True, "Lesen der Sperre ist keine Freischaltung"
+
+
+def test_gesperrte_installation_ohne_konto_antwortet_mit_kennung(client, monkeypatch):
+    """Lehnt der Hub schon den Beitritt ab, gibt es keinen Token – dann
+    spricht die Installation mit Kennung und Geheimnis."""
+    core.set_setting("hub_instance_code", "inst_a")
+    core.set_setting("hub_instance_secret", "geheim")
+    monkeypatch.setattr(hub.requests, "request", lambda *a, **k: _Resp(
+        403, {"error": "gesperrt", "blocked": True, "instance_code": "inst_a",
+              "grund": "Spam"}))
+    with pytest.raises(hub.HubError):
+        hub.connect_with_invite("inv_x", "Bruno")
+    s = client.get("/api/hub").json()
+    assert s["connected"] is False and s["installation_gesperrt"]["grund"] == "Spam"
+    sp = client.get("/api/hub/sperre").json()
+    assert sp["nur_installation"] and sp["stellungnahme_moeglich"]
+    gesendet = {}
+    def post(method, url, **k):
+        gesendet.update(url=url, body=k.get("json"), auth=(k.get("headers") or {}).get("Authorization"))
+        return _Resp(200, {"ok": True, "notice_id": 4, "reply_at": 8})
+    monkeypatch.setattr(hub.requests, "request", post)
+    r = client.post("/api/hub/sperre/stellungnahme", json={"text": "Hallo"})
+    assert r.status_code == 200
+    assert gesendet["url"].endswith("/v1/instance/stellungnahme")
+    assert gesendet["body"] == {"instance_code": "inst_a",
+                                "instance_secret": "geheim", "text": "Hallo"}
+    assert not gesendet["auth"]
+
+
+def test_nicht_gesperrte_installation_bekommt_409(client, monkeypatch):
+    core.set_setting("hub_token", "t")
+    def nicht(*a):
+        raise hub.HubError(409, "nicht gesperrt")
+    monkeypatch.setattr(hub, "reply_block", nicht)
+    r = client.post("/api/hub/sperre/stellungnahme", json={"text": "Hallo"})
+    assert r.status_code == 409 and "nicht (mehr) gesperrt" in r.json()["detail"]
+
+
+def test_ohne_hub_und_ohne_sperre_keine_stellungnahme(client):
+    r = client.post("/api/hub/sperre/stellungnahme", json={"text": "Hallo"})
+    assert r.status_code == 400

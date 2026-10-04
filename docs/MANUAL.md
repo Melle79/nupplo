@@ -1913,6 +1913,11 @@ means:
   reconnecting; messages that arrived while you were blocked are delivered
   afterwards.
 
+**Responding:** below the block notice there is "Respond". There you tell the
+hub admin how you see things; sending again replaces your earlier response. If
+the hub already refuses to let you join because this installation is blocked,
+*More → Trading network* says so – with the same option to respond.
+
 Hence the advice on the notice: **do not leave the network.** Leaving releases
 the account, and the only way back is a new invitation.
 

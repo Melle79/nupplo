@@ -3551,3 +3551,4 @@ button.cm-chip { cursor: pointer; min-height: 30px; }
 .stellungnahme-form textarea { width: 100%; box-sizing: border-box; }
 .hinweis-knoepfe { display: flex; flex-wrap: wrap; gap: 8px; margin: 6px 0 4px; }
 .hinweis-knoepfe .mini-btn { flex: none; padding: 6px 14px; font-size: 13px; }
+#hub-sperre-stellung:empty { display: none; }
