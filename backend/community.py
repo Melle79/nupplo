@@ -112,6 +112,8 @@ def _hub_status(refresh: bool = False) -> dict:
             "verwaist": hub.verwaist(),
             "block": hub.block_info() if hub.blocked() else None,
             "pause": pause, "hinweise": hinweise,
+            "installation_gesperrt": (None if hub.enabled()
+                                      else hub.installation_gesperrt()),
             "inaktiv_tage": int(tage) if tage and tage.isdigit() else None}
 
 
@@ -207,6 +209,67 @@ def hub_stellungnahme(notice_id: int, body: StellungnahmeBody,
             h["reply_text"], h["reply_at"] = text, r.get("reply_at")
     core.set_setting("hub_hinweise", json.dumps(offen))
     return {"ok": True, "reply_at": r.get("reply_at"), "hinweise": offen}
+
+
+def _sperre_fehler(e: Exception) -> HTTPException:
+    if isinstance(e, hub.HubError):
+        if e.status == 404 and "unbekannter Endpunkt" in (e.message or ""):
+            return HTTPException(501, "Der Hub kennt Stellungnahmen zu Sperren "
+                                      "noch nicht – er muss erst aktualisiert "
+                                      "werden.")
+        if e.status == 409:
+            return HTTPException(409, "Diese Installation ist nicht (mehr) "
+                                      "gesperrt.")
+        if e.status == 404:
+            return HTTPException(409, "Der Hub führt diese Installation nicht "
+                                      "mehr als Mitglied.")
+        if e.status == 403 and not hub.enabled():
+            return HTTPException(409, "Der Hub erkennt diese Installation "
+                                      "nicht wieder.")
+        return _hub_antwort(e)
+    return HTTPException(502, "Hub nicht erreichbar")
+
+
+@router.get("/api/hub/sperre")
+def hub_sperre(user: dict = Depends(current_user)):
+    """Die eigene Sperre samt Stellungnahme (ab Hub 1.26.0).
+
+    Ohne Mitgliedskonto – wenn schon der Beitritt abgelehnt wurde, weil die
+    Installation gesperrt ist – kennt der Hub keine Abfrage; dann steht hier
+    nur, was beim Beitritt zurückkam, und ob eine Stellungnahme möglich ist.
+    """
+    if hub.enabled():
+        try:
+            return {"sperre": hub.my_block(), "nur_installation": False}
+        except (hub.HubError, requests.RequestException) as e:
+            raise _sperre_fehler(e)
+    info = hub.installation_gesperrt()
+    return {"sperre": None, "nur_installation": bool(info),
+            "installation": info,
+            "stellungnahme_moeglich": bool(info)
+            and hub.kann_als_installation_antworten()}
+
+
+@router.post("/api/hub/sperre/stellungnahme")
+def hub_sperre_stellungnahme(body: StellungnahmeBody,
+                             user: dict = Depends(current_user)):
+    """Zur Sperre Stellung nehmen (04.10.2026: „Zugang gesperrt“ ließ keine
+    Gegenrede zu). Erneutes Senden ersetzt die frühere Stellungnahme. Ohne
+    Mitgliedskonto spricht die Installation mit Kennung und Geheimnis."""
+    text = body.text.strip()
+    if not text:
+        raise HTTPException(400, "Bitte schreib, was du dazu sagen möchtest.")
+    try:
+        if hub.enabled():
+            r = hub.reply_block(text)
+        elif hub.installation_gesperrt() and hub.kann_als_installation_antworten():
+            r = hub.reply_block_as_instance(text)
+        else:
+            raise HTTPException(400, "Kein Hub verbunden")
+    except (hub.HubError, requests.RequestException) as e:
+        raise _sperre_fehler(e)
+    return {"ok": True, "reply_at": r.get("reply_at"),
+            "notice_id": r.get("notice_id")}
 
 
 def _pause_melden(pause: dict) -> None:

@@ -313,6 +313,9 @@ def test_jede_gespeicherte_einstellung_ist_eingeordnet():
                                 # den Sperrhinweis der eigenen Instanz
         "hub_hinweise",         # offene Mitteilungen des Hub-Admins
         "hub_hinweise_gemeldet",  # welche davon schon als Hinweis kamen
+        "hub_installation_gesperrt",  # Grund/Ende, wenn schon der Beitritt
+                                # abgelehnt wurde, weil die Installation
+                                # gesperrt ist – vom Hub, nur zur Anzeige
         "katalog_quelle",       # Adresse der veröffentlichten Datei. Kein
                                 # Zugang: Sie ist öffentlich, und genau
                                 # deshalb steht kein BrickLink-Inhalt darin

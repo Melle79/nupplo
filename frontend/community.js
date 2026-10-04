@@ -33,6 +33,16 @@ function renderHubStatus(s) {
   $("hub-connect-box").hidden = on;
   $("hub-connected-box").hidden = !on;
   if (s && s.url) $("hub-url-line").textContent = s.url;
+  // Schon der Beitritt abgelehnt, weil die Installation gesperrt ist?
+  const ig = !on && s && s.installation_gesperrt;
+  $("hub-inst-gesperrt").hidden = !ig;
+  if (ig) {
+    $("hub-inst-gesperrt-grund").textContent = [
+      ig.grund ? tr("Grund: {grund}", { grund: ig.grund }) : "",
+      ig.bis ? tr("Die Sperre endet am {datum}.", { datum: datumText(ig.bis) }) : "",
+    ].filter(Boolean).join(" ");
+    zeigeSperrStellungnahme("hub-inst-stellung");
+  }
   if (!on) return;
   $("hub-member-name").textContent = s.display_name || "(unbenannt)";
   $("hub-admin-badge").hidden = !s.is_admin;
@@ -63,7 +73,12 @@ function wireHubConnectOnce() {
         body: { invite_code, display_name } }), "Dem Netzwerk beigetreten 🤝");
       // Direkt danach durch die Einstellungen führen – überspringbar.
       communityPlanerStarten();
-    } catch (e) { err.textContent = e.message; err.hidden = false; }
+    } catch (e) {
+      err.textContent = e.message; err.hidden = false;
+      // Abgelehnt, weil die Installation gesperrt ist? Dann zeigt der
+      // Status das samt „Stellung nehmen“.
+      api("/hub").then(renderHubStatus).catch(() => {});
+    }
   });
 
   $("hub-disconnect").addEventListener("click", async () => {
@@ -154,7 +169,8 @@ function stellungnahmeKnopf(h) {
 
 /* Das Feld klappt unter der Mitteilung auf. Erneutes Senden ersetzt die
    alte Stellungnahme – der Hub-Admin sieht immer nur die letzte. */
-function verdrahteStellungnahme(box, liste, danach) {
+function verdrahteStellungnahme(box, liste, danach,
+  ziel = (h) => `/hub/hinweise/${h.id}/stellungnahme`) {
   box.querySelectorAll("[data-stellung]").forEach((b) => {
     b.addEventListener("click", () => {
       const zeile = b.closest("[data-hinweis]");
@@ -187,8 +203,7 @@ function verdrahteStellungnahme(box, liste, danach) {
         if (!text) { toast(tr("Bitte schreib, was du dazu sagen möchtest.")); return; }
         ev.target.disabled = true;
         try {
-          const r = await api(`/hub/hinweise/${h.id}/stellungnahme`,
-            { method: "POST", body: { text } });
+          const r = await api(ziel(h), { method: "POST", body: { text } });
           toast(tr("Stellungnahme gesendet"));
           danach(r);
           ladeMitteilungen();
@@ -199,6 +214,26 @@ function verdrahteStellungnahme(box, liste, danach) {
       });
     });
   });
+}
+
+/* Stellung nehmen zur Sperre selbst (ab Hub 1.26.0). Mit Konto fragt die
+   Instanz den Hub nach der Sperre; ohne Konto – wenn schon der Beitritt
+   abgelehnt wurde – spricht der Server als Installation. Erneutes Senden
+   ersetzt die frühere Stellungnahme. */
+async function zeigeSperrStellungnahme(boxId) {
+  const box = $(boxId);
+  let d;
+  try { d = await api("/hub/sperre"); } catch (_) { box.innerHTML = ""; return; }
+  const moeglich = d.sperre || d.stellungnahme_moeglich;
+  if (!moeglich) { box.innerHTML = ""; return; }
+  const h = Object.assign({ id: "sperre" }, d.sperre || {});
+  box.innerHTML = `<div data-hinweis="sperre">
+      ${stellungnahmeText(h)}
+      <div class="hinweis-knoepfe">${stellungnahmeKnopf(h)}</div>
+      <div class="stellungnahme-form" hidden></div>
+    </div>`;
+  verdrahteStellungnahme(box, [h], () => zeigeSperrStellungnahme(boxId),
+    () => "/hub/sperre/stellungnahme");
 }
 
 /* Der eigene Verlauf: alle Mitteilungen, auch bestätigte und
@@ -279,6 +314,8 @@ async function loadHubView() {
     // Einladen geht weder gesperrt noch ohne Mitgliedschaft.
     $("hub-make-invite").hidden = !!(s.blocked || s.verwaist);
     zeigeSperrgrund(s.block);
+    if (s.blocked) zeigeSperrStellungnahme("hub-sperre-stellung");
+    else $("hub-sperre-stellung").innerHTML = "";
     zeigeHinweise(s.hinweise || []);
     const mb = $("hub-mitteilungen");
     mb.hidden = !!s.verwaist;

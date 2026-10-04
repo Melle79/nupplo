@@ -79,6 +79,7 @@ def _store(token, me):
 
 
 def disconnect():
+    # hub_installation_gesperrt bleibt stehen: Abmelden hebt keine Sperre auf.
     for k in ("hub_token", "hub_member_id", "hub_display_name",
               "hub_is_admin", "hub_last_publish", "hub_blocked",
               "hub_key_sent", "hub_wuensche_zeigen", "hub_wuensche_stand",
@@ -166,7 +167,8 @@ def _request(method, url, path, token=None, body=None, timeout=TIMEOUT):
             # (Tausch-Gesamttest 26.09.2026). Merken, damit sie es sagen und
             # den Weg zum Neubeitritt anbieten kann.
             core.set_setting("hub_verwaist", "1")
-        raise HubError(resp.status_code, msg or f"Hub-Fehler {resp.status_code}")
+        raise HubError(resp.status_code, msg or f"Hub-Fehler {resp.status_code}",
+                       data if isinstance(data, dict) else {})
     if token and _eigener_token(token) and core.get_setting("hub_verwaist"):
         core.set_setting("hub_verwaist", "")
     if (token and core.get_setting("hub_blocked")
@@ -180,14 +182,15 @@ def _request(method, url, path, token=None, body=None, timeout=TIMEOUT):
 # eigenen Mitteilungen lesen und Stellung nehmen. Eine Antwort darauf heißt
 # also nicht „wieder freigeschaltet“ – sonst verschwände der Sperrhinweis,
 # sobald jemand seine Verwarnungen öffnet.
-_AUCH_GESPERRT = ("/v1/notices",)
+_AUCH_GESPERRT = ("/v1/notices", "/v1/sperre")
 
 
 class HubError(Exception):
-    def __init__(self, status, message):
+    def __init__(self, status, message, data=None):
         super().__init__(message)
         self.status = status
         self.message = message
+        self.data = data or {}
 
 
 # ------------------------------------------------------------------ Aktionen
@@ -208,7 +211,18 @@ def connect_with_invite(invite_code: str, display_name: str) -> dict:
     """
     body = {"invite_code": invite_code, "display_name": display_name}
     body.update(_instance_claim())
-    res = _request("POST", HUB_URL, "/v1/register", body=body)
+    try:
+        res = _request("POST", HUB_URL, "/v1/register", body=body)
+    except HubError as e:
+        if e.data.get("blocked"):
+            # Gesperrt ist die Installation selbst, nicht ein Mitglied – ein
+            # neuer Beitritt hilft also nicht. Merken, damit die Oberfläche
+            # das sagen und eine Stellungnahme anbieten kann (Hub 1.26.0).
+            _remember_instance(e.data)
+            core.set_setting("hub_installation_gesperrt", json.dumps(
+                {"grund": e.data.get("grund"), "bis": e.data.get("bis")}))
+        raise
+    core.set_setting("hub_installation_gesperrt", "")
     _store(res.get("token", ""), res)
     _remember_instance(res)
     return res
@@ -258,6 +272,38 @@ def block_info() -> dict | None:
 
 def ack_notice(notice_id: int) -> dict:
     return _authed("POST", f"/v1/notices/{notice_id}/ack")
+
+
+def installation_gesperrt() -> dict | None:
+    """Wurde ein Beitritt abgelehnt, weil die Installation gesperrt ist?"""
+    try:
+        raw = core.get_setting("hub_installation_gesperrt")
+        return json.loads(raw) if raw else None
+    except ValueError:
+        return None
+
+
+def kann_als_installation_antworten() -> bool:
+    return bool(_instance_claim())
+
+
+def my_block() -> dict | None:
+    """Die Sperre des eigenen Mitglieds samt Stellungnahme (ab Hub 1.26.0)."""
+    return _authed("GET", "/v1/sperre").get("sperre")
+
+
+def reply_block(text: str) -> dict:
+    """Zur Sperre Stellung nehmen – als Mitglied, auch gesperrt."""
+    return _authed("POST", "/v1/sperre/stellungnahme", body={"text": text})
+
+
+def reply_block_as_instance(text: str) -> dict:
+    """Zur Sperre Stellung nehmen, wenn es kein Mitgliedskonto gibt und nur
+    die Installation gesperrt ist. Ausweis sind Kennung und Geheimnis der
+    Installation, kein Token."""
+    body = _instance_claim()
+    body["text"] = text
+    return _request("POST", HUB_URL, "/v1/instance/stellungnahme", body=body)
 
 
 def my_notices() -> list:

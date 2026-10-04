@@ -2576,6 +2576,12 @@ Hinweis. Was das bedeutet:
   ohne neu zu verbinden; in der Sperrzeit eingegangene Nachrichten werden
   nachgeliefert.
 
+**Stellung nehmen:** Unter dem Sperrhinweis steht „Stellung nehmen“. Dort
+schreibst du dem Hub-Admin, wie du die Sache siehst; erneutes Senden ersetzt
+die frühere Stellungnahme. Lehnt der Hub schon den Beitritt ab, weil diese
+Installation gesperrt ist, steht das unter *Mehr → Tausch-Netzwerk* – mit
+derselben Möglichkeit zur Stellungnahme.
+
 Deshalb der Rat auf dem Hinweis: **nicht abmelden.** Abmelden löst das
 Konto, und zurück geht es nur mit einer neuen Einladung.
 
