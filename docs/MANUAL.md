@@ -1893,6 +1893,14 @@ top of the Trade tab with the admin's text until you press "Got it". With a
 block, the block notice shows the reason and the end date; a temporary block
 lifts itself afterwards. You won't learn who reported you.
 
+**Responding:** next to "Got it" there is "Respond". There you tell the hub
+admin how you see things (up to 2000 characters). Only the admin reads it.
+Sending again replaces your earlier response. **📣 My messages from the hub
+admin** lists every message to you, including acknowledged ones, each with
+your response. If the hub admin withdraws a message, it stays there struck
+through, with the date and the admin's reason. All of this also works while
+you are blocked; the list is then already expanded.
+
 ### 12.8 When access has been blocked
 
 A hub admin can block access. The Trade tab then shows a clear notice. What it

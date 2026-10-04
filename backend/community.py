@@ -151,6 +151,64 @@ def hub_hinweis_gelesen(notice_id: int, user: dict = Depends(current_user)):
     return {"ok": True, "hinweise": rest}
 
 
+class StellungnahmeBody(BaseModel):
+    text: str = Field(max_length=2000)
+
+
+def _mitteilungen_fehler(e: Exception) -> HTTPException:
+    if isinstance(e, hub.HubError):
+        if e.status == 404 and "unbekannter Endpunkt" in (e.message or ""):
+            return HTTPException(501, "Der Hub kennt Stellungnahmen noch "
+                                      "nicht – er muss erst aktualisiert "
+                                      "werden.")
+        if e.status == 409:
+            return HTTPException(409, "Diese Mitteilung hat der Hub-Admin "
+                                      "schon zurückgenommen.")
+        return _hub_antwort(e)
+    return HTTPException(502, "Hub nicht erreichbar")
+
+
+@router.get("/api/hub/mitteilungen")
+def hub_mitteilungen(user: dict = Depends(current_user)):
+    """Alle eigenen Mitteilungen des Hub-Admins, auch bestätigte und
+    zurückgenommene (ab Hub 1.25.0).
+
+    Geht auch während einer Sperre – gerade dann will man nachlesen,
+    warum, und Stellung nehmen können (04.10.2026: Eine Verwarnung blieb
+    ohne Gegenrede im Verlauf stehen).
+    """
+    if not hub.enabled():
+        raise HTTPException(400, "Kein Hub verbunden")
+    try:
+        return {"mitteilungen": hub.my_notices()}
+    except (hub.HubError, requests.RequestException) as e:
+        raise _mitteilungen_fehler(e)
+
+
+@router.post("/api/hub/hinweise/{notice_id}/stellungnahme")
+def hub_stellungnahme(notice_id: int, body: StellungnahmeBody,
+                      user: dict = Depends(current_user)):
+    """Zu einer Mitteilung Stellung nehmen. Erneutes Senden ersetzt die
+    alte Stellungnahme – der Hub-Admin sieht immer nur die letzte."""
+    if not hub.enabled():
+        raise HTTPException(400, "Kein Hub verbunden")
+    text = body.text.strip()
+    if not text:
+        raise HTTPException(400, "Bitte schreib, was du dazu sagen möchtest.")
+    try:
+        r = hub.reply_notice(notice_id, text)
+    except (hub.HubError, requests.RequestException) as e:
+        raise _mitteilungen_fehler(e)
+    # Die offenen Hinweise oben im Tausch-Tab sollen die Stellungnahme gleich
+    # zeigen, nicht erst nach dem nächsten Abgleich.
+    offen = hub.hinweise()
+    for h in offen:
+        if h.get("id") == notice_id:
+            h["reply_text"], h["reply_at"] = text, r.get("reply_at")
+    core.set_setting("hub_hinweise", json.dumps(offen))
+    return {"ok": True, "reply_at": r.get("reply_at"), "hinweise": offen}
+
+
 def _pause_melden(pause: dict) -> None:
     """Einmal je Pause einen Hinweis hinterlegen.
 

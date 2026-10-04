@@ -3543,3 +3543,11 @@ button.cm-chip { cursor: pointer; min-height: 30px; }
 .einladung-zeile code { font-size: 12px; }
 .einladung-knoepfe { display: flex; gap: 4px; }
 .einladung-knoepfe .mini-btn { padding: 4px 8px; font-size: 12px; min-height: 0; }
+
+/* Zurückgenommene Mitteilungen bleiben im eigenen Verlauf lesbar, aber
+   durchgestrichen (Hub 1.25.0). */
+.zurueckgenommen { text-decoration: line-through; opacity: .7; }
+.stellungnahme-form { margin-top: 8px; }
+.stellungnahme-form textarea { width: 100%; box-sizing: border-box; }
+.hinweis-knoepfe { display: flex; flex-wrap: wrap; gap: 8px; margin: 6px 0 4px; }
+.hinweis-knoepfe .mini-btn { flex: none; padding: 6px 14px; font-size: 13px; }

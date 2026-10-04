@@ -1,5 +1,21 @@
 # Changelog
 
+## 3.5.0 – Oktober 2026
+
+### Neu
+- 📣 **Zu einer Mitteilung des Hub-Admins Stellung nehmen.** Bisher blieb
+  eine Verwarnung ohne Gegenrede im Verlauf stehen – man konnte sie nur mit
+  „Verstanden“ wegdrücken. Jetzt steht daneben „Stellung nehmen“: ein Feld
+  für bis zu 2000 Zeichen, das nur der Hub-Admin liest. Erneutes Senden
+  ersetzt die frühere Stellungnahme. Braucht Hub 1.25.0.
+- 📣 **Meine Mitteilungen vom Hub-Admin.** Im Tausch-Tab stehen alle
+  Mitteilungen an dich, auch bestätigte, mit deiner Stellungnahme.
+  Zurückgenommene bleiben durchgestrichen mit Datum und Begründung stehen.
+- 🚫 **Auch gesperrt kann man Stellung nehmen.** Der Hub beantwortet die
+  eigenen Mitteilungen auch während einer Sperre; die Liste ist dann gleich
+  aufgeklappt. Das Lesen hebt den Sperrhinweis nicht auf – bisher galt jede
+  erfolgreiche Antwort des Hubs als Freischaltung.
+
 ## 3.4.4 – Oktober 2026
 
 ### Behoben
