@@ -7,7 +7,7 @@
   bisher nur in die Farbliste der Bildanalyse. Nannte der BrickLink-Name
   „… Red Legs", fehlte Rot aber in der Liste, fiel die Figur heraus – und
   umgekehrt kam „Red Torso, Blue Legs" herein, weil Rot irgendwo stand.
-  Jetzt liest Nupplo aus dem Namen, welches Teil welche Farbe hat
+  Jetzt liest Nupplo SE aus dem Namen, welches Teil welche Farbe hat
   (`backend/namensfarben.py`): Fragt jemand nach einem Teil, entscheidet
   der Name; ohne Teil holt er eine Figur nur noch herein, hinter die
   Treffer der Farbliste („roter Droide" bleibt R-3PO).
