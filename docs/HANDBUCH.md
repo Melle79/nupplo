@@ -2555,6 +2555,15 @@ Text, bis du „Verstanden“ drückst. Bei einer Sperre zeigt der Sperrhinweis
 den Grund und das Ende, eine befristete Sperre hebt sich danach von selbst
 auf. Wer gemeldet hat, erfährst du nicht.
 
+**Stellung nehmen:** Neben „Verstanden“ steht „Stellung nehmen“. Dort
+schreibst du dem Hub-Admin, wie du die Sache siehst (bis 2000 Zeichen). Das
+liest nur er. Schickst du noch einmal, ersetzt das die frühere
+Stellungnahme. Unter **📣 Meine Mitteilungen vom Hub-Admin** stehen alle
+Mitteilungen an dich, auch bestätigte, jeweils mit deiner Stellungnahme.
+Nimmt der Hub-Admin eine Mitteilung zurück, bleibt sie dort durchgestrichen
+stehen, mit dem Datum und seiner Begründung. Das alles geht auch während
+einer Sperre; die Liste ist dann gleich aufgeklappt.
+
 ### 12.8 Wenn der Zugang gesperrt wurde
 
 Ein Hub-Admin kann Zugänge sperren. Dann steht im Tausch-Tab ein deutlicher

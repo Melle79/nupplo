@@ -1023,3 +1023,65 @@ def test_withdraw_invite(client, monkeypatch):
     with core.db() as conn:
         assert conn.execute("SELECT COUNT(*) FROM hub_invites").fetchone()[0] == 0
     assert client.delete("/api/hub/invites/kaputt").status_code == 400
+
+
+# ------------------------------------------- Stellungnahme (Hub 1.25.0)
+
+def test_stellungnahme_geht_an_den_hub_und_steht_gleich_im_hinweis(client, monkeypatch):
+    """04.10.2026: Eine Verwarnung blieb ohne Gegenrede im Verlauf stehen."""
+    core.set_setting("hub_token", "t")
+    core.set_setting("hub_hinweise", '[{"id": 3, "kind": "verwarnung", '
+                     '"text": "Bitte freundlich bleiben.", "created_at": 1}]')
+    gesendet = {}
+    monkeypatch.setattr(hub, "reply_notice", lambda nid, text: gesendet.update(
+        nid=nid, text=text) or {"ok": True, "reply_at": 42})
+    r = client.post("/api/hub/hinweise/3/stellungnahme",
+                    json={"text": "  War ein Missverständnis.  "})
+    assert r.status_code == 200 and r.json()["reply_at"] == 42
+    assert gesendet == {"nid": 3, "text": "War ein Missverständnis."}
+    h = client.get("/api/hub").json()["hinweise"][0]
+    assert h["reply_text"] == "War ein Missverständnis." and h["reply_at"] == 42
+
+
+def test_leere_oder_zu_lange_stellungnahme_wird_abgewiesen(client, monkeypatch):
+    core.set_setting("hub_token", "t")
+    monkeypatch.setattr(hub, "reply_notice", lambda *a: pytest.fail("gesendet"))
+    assert client.post("/api/hub/hinweise/3/stellungnahme",
+                       json={"text": "   "}).status_code == 400
+    assert client.post("/api/hub/hinweise/3/stellungnahme",
+                       json={"text": "x" * 2001}).status_code == 422
+
+
+def test_zurueckgenommene_mitteilung_sagt_das(client, monkeypatch):
+    core.set_setting("hub_token", "t")
+    def weg(*a):
+        raise hub.HubError(409, "zurückgenommen")
+    monkeypatch.setattr(hub, "reply_notice", weg)
+    r = client.post("/api/hub/hinweise/3/stellungnahme", json={"text": "Hallo"})
+    assert r.status_code == 409 and "zurückgenommen" in r.json()["detail"]
+
+
+def test_alter_hub_kennt_keine_mitteilungen(client, monkeypatch):
+    core.set_setting("hub_token", "t")
+    def alt():
+        raise hub.HubError(404, "unbekannter Endpunkt")
+    monkeypatch.setattr(hub, "my_notices", alt)
+    r = client.get("/api/hub/mitteilungen")
+    assert r.status_code == 501 and "aktualisiert" in r.json()["detail"]
+
+
+def test_mitteilungen_lesen_hebt_die_sperre_nicht_auf(client, monkeypatch):
+    """Der Hub beantwortet /v1/notices auch Gesperrten. Bisher galt jede
+    erfolgreiche Antwort als Freischaltung – der Sperrhinweis wäre beim
+    Öffnen der eigenen Verwarnungen verschwunden."""
+    core.set_setting("hub_token", "bft_x")
+    core.set_setting("hub_blocked", "1")
+    monkeypatch.setattr(hub.requests, "request", lambda *a, **k: _Resp(
+        200, {"notices": [{"id": 3, "kind": "sperre", "reply_text": None}]}))
+    r = client.get("/api/hub/mitteilungen")
+    assert r.status_code == 200 and r.json()["mitteilungen"][0]["id"] == 3
+    assert hub.blocked() is True
+    monkeypatch.setattr(hub.requests, "request", lambda *a, **k: _Resp(
+        200, {"ok": True, "reply_at": 5}))
+    client.post("/api/hub/hinweise/3/stellungnahme", json={"text": "Hallo"})
+    assert hub.blocked() is True

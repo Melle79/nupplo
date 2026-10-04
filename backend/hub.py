@@ -169,10 +169,18 @@ def _request(method, url, path, token=None, body=None, timeout=TIMEOUT):
         raise HubError(resp.status_code, msg or f"Hub-Fehler {resp.status_code}")
     if token and _eigener_token(token) and core.get_setting("hub_verwaist"):
         core.set_setting("hub_verwaist", "")
-    if token and core.get_setting("hub_blocked"):
+    if (token and core.get_setting("hub_blocked")
+            and not path.startswith(_AUCH_GESPERRT)):
         core.set_setting("hub_blocked", "")     # Freischaltung bemerkt
         core.set_setting("hub_block_info", "")
     return data
+
+
+# Was der Hub (ab 1.25.0) auch einem gesperrten Mitglied beantwortet: die
+# eigenen Mitteilungen lesen und Stellung nehmen. Eine Antwort darauf heißt
+# also nicht „wieder freigeschaltet“ – sonst verschwände der Sperrhinweis,
+# sobald jemand seine Verwarnungen öffnet.
+_AUCH_GESPERRT = ("/v1/notices",)
 
 
 class HubError(Exception):
@@ -250,6 +258,18 @@ def block_info() -> dict | None:
 
 def ack_notice(notice_id: int) -> dict:
     return _authed("POST", f"/v1/notices/{notice_id}/ack")
+
+
+def my_notices() -> list:
+    """Alle eigenen Mitteilungen samt Stellungnahmen und Rücknahmen (ab Hub
+    1.25.0) – auch bestätigte, und auch während einer Sperre."""
+    return _authed("GET", "/v1/notices").get("notices", [])
+
+
+def reply_notice(notice_id: int, text: str) -> dict:
+    """Stellung nehmen (ab Hub 1.25.0). Erneutes Senden ersetzt die alte
+    Stellungnahme; 409 heißt: Die Mitteilung ist schon zurückgenommen."""
+    return _authed("POST", f"/v1/notices/{notice_id}/reply", body={"text": text})
 
 
 def leave() -> dict:

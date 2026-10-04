@@ -107,18 +107,23 @@ function zeigeSperrgrund(b) {
 
 /* Mitteilungen des Hub-Admins (Hinweis, Verwarnung, Sperre) – sie stehen
    oben im Tausch-Tab, bis man „Verstanden“ drückt. Wer gemeldet hat,
-   steht bewusst nicht dabei. */
+   steht bewusst nicht dabei. Seit Hub 1.25.0 kann man dazu Stellung
+   nehmen; bis dahin blieb eine Verwarnung ohne Gegenrede im Verlauf
+   stehen (04.10.2026). */
 function zeigeHinweise(liste) {
   const box = $("hub-hinweise");
   box.innerHTML = liste.map((h) => `
     <div class="warn-line${h.kind === "hinweis" ? " info" : ""}" data-hinweis="${h.id}">
       <b>📣 ${esc(massnahmeText(h.kind))}</b>
-      <span class="sub">· ${esc(new Date(h.created_at * 1000)
-        .toLocaleDateString(dateLocale()))}</span><br>
+      <span class="sub">· ${esc(datumText(h.created_at))}</span><br>
       ${h.text ? esc(h.text) + "<br>" : ""}
-      ${h.until ? esc(tr("Gesperrt bis {datum}.", { datum:
-        new Date(h.until * 1000).toLocaleDateString(dateLocale()) })) + "<br>" : ""}
-      <button class="mini-btn" data-verstanden="${h.id}">${esc(tr("Verstanden"))}</button>
+      ${h.until ? esc(tr("Gesperrt bis {datum}.", { datum: datumText(h.until) })) + "<br>" : ""}
+      ${stellungnahmeText(h)}
+      <div class="hinweis-knoepfe">
+        <button class="mini-btn" data-verstanden="${h.id}">${esc(tr("Verstanden"))}</button>
+        ${h.ruecknahme_von ? "" : stellungnahmeKnopf(h)}
+      </div>
+      <div class="stellungnahme-form" hidden></div>
     </div>`).join("");
   box.querySelectorAll("[data-verstanden]").forEach((b) => {
     b.addEventListener("click", async () => {
@@ -129,6 +134,111 @@ function zeigeHinweise(liste) {
       } catch (e) { toast(e.message); }
     });
   });
+  verdrahteStellungnahme(box, liste, (r) => zeigeHinweise(r.hinweise || []));
+}
+
+function datumText(ts) {
+  return new Date(ts * 1000).toLocaleDateString(dateLocale());
+}
+
+function stellungnahmeText(h) {
+  if (!h.reply_text) return "";
+  return `<span class="sub">${esc(tr("Deine Stellungnahme vom {datum}:",
+    { datum: datumText(h.reply_at) }))}</span> ${esc(h.reply_text)}<br>`;
+}
+
+function stellungnahmeKnopf(h) {
+  return `<button class="mini-btn" data-stellung="${h.id}">${esc(tr(
+    h.reply_text ? "Stellungnahme ändern" : "Stellung nehmen"))}</button>`;
+}
+
+/* Das Feld klappt unter der Mitteilung auf. Erneutes Senden ersetzt die
+   alte Stellungnahme – der Hub-Admin sieht immer nur die letzte. */
+function verdrahteStellungnahme(box, liste, danach) {
+  box.querySelectorAll("[data-stellung]").forEach((b) => {
+    b.addEventListener("click", () => {
+      const zeile = b.closest("[data-hinweis]");
+      const form = zeile.querySelector(".stellungnahme-form");
+      const h = liste.find((x) => String(x.id) === b.dataset.stellung) || {};
+      if (!form.hidden) { form.hidden = true; return; }
+      form.innerHTML = `
+        <textarea rows="4" maxlength="2000">${esc(h.reply_text || "")}</textarea>
+        <span class="sub" data-zaehler></span><br>
+        <div class="hinweis-knoepfe">
+          <button class="mini-btn" data-senden>${esc(tr("Stellungnahme senden"))}</button>
+          <button class="mini-btn" data-abbrechen>${esc(tr("Abbrechen"))}</button>
+        </div>
+        <span class="sub">${esc(tr("Das liest nur der Hub-Admin. Senden "
+          + "ersetzt eine frühere Stellungnahme."))}</span>`;
+      form.hidden = false;
+      const feld = form.querySelector("textarea");
+      const zaehler = () => {
+        form.querySelector("[data-zaehler]").textContent =
+          tr("{n} von 2000 Zeichen", { n: feld.value.length });
+      };
+      feld.addEventListener("input", zaehler);
+      zaehler();
+      feld.focus();
+      form.querySelector("[data-abbrechen]").addEventListener("click", () => {
+        form.hidden = true;
+      });
+      form.querySelector("[data-senden]").addEventListener("click", async (ev) => {
+        const text = feld.value.trim();
+        if (!text) { toast(tr("Bitte schreib, was du dazu sagen möchtest.")); return; }
+        ev.target.disabled = true;
+        try {
+          const r = await api(`/hub/hinweise/${h.id}/stellungnahme`,
+            { method: "POST", body: { text } });
+          toast(tr("Stellungnahme gesendet"));
+          danach(r);
+          ladeMitteilungen();
+        } catch (e) {
+          toast(e.message);
+          ev.target.disabled = false;
+        }
+      });
+    });
+  });
+}
+
+/* Der eigene Verlauf: alle Mitteilungen, auch bestätigte und
+   zurückgenommene. Geht auch während einer Sperre – dann ist er gleich
+   aufgeklappt, denn oben steht sonst nur „gesperrt“. */
+async function ladeMitteilungen() {
+  const box = $("hub-mitteilungen");
+  const liste = $("hub-mitteilungen-liste");
+  if (box.hidden || !box.open) return;
+  liste.textContent = tr("Lädt …");
+  let m;
+  try {
+    m = (await api("/hub/mitteilungen")).mitteilungen || [];
+  } catch (e) {
+    liste.textContent = e.message;
+    return;
+  }
+  if (!m.length) {
+    liste.textContent = tr("Bisher keine Mitteilungen vom Hub-Admin.");
+    return;
+  }
+  liste.innerHTML = m.map((h) => {
+    const weg = !!h.revoked_at;
+    return `
+    <div class="warn-line${h.kind === "hinweis" ? " info" : ""}" data-hinweis="${h.id}">
+      <span${weg ? ' class="zurueckgenommen"' : ""}>
+        <b>${esc(massnahmeText(h.kind))}</b>
+        <span class="sub">· ${esc(datumText(h.created_at))}</span><br>
+        ${h.text ? esc(h.text) + "<br>" : ""}
+      </span>
+      ${weg ? `<span class="sub">${esc(tr("Zurückgenommen am {datum}.",
+        { datum: datumText(h.revoked_at) }))}${h.revoke_reason
+        ? " " + esc(h.revoke_reason) : ""}</span><br>` : ""}
+      ${stellungnahmeText(h)}
+      ${weg || h.ruecknahme_von ? ""
+        : `<div class="hinweis-knoepfe">${stellungnahmeKnopf(h)}</div>`}
+      <div class="stellungnahme-form" hidden></div>
+    </div>`;
+  }).join("");
+  verdrahteStellungnahme(liste, m, (r) => zeigeHinweise(r.hinweise || []));
 }
 
 /* Waren die eigenen Angebote pausiert, weil man länger nicht da war? Das
@@ -170,6 +280,10 @@ async function loadHubView() {
     $("hub-make-invite").hidden = !!(s.blocked || s.verwaist);
     zeigeSperrgrund(s.block);
     zeigeHinweise(s.hinweise || []);
+    const mb = $("hub-mitteilungen");
+    mb.hidden = !!s.verwaist;
+    if (s.blocked) mb.open = true;
+    ladeMitteilungen();
     zeigePause(s);
     const lp = s.last_publish;
     const lpEl = $("hub-last-publish");
@@ -830,6 +944,7 @@ async function loadShareView() {
 function wireHubViewOnce() {
   if (hubViewWired) return;
   hubViewWired = true;
+  $("hub-mitteilungen").addEventListener("toggle", ladeMitteilungen);
 
   document.querySelectorAll("[data-hubtab]").forEach((b) => {
     b.addEventListener("click", () => showHubTab(b.dataset.hubtab));
