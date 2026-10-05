@@ -1900,6 +1900,8 @@ admin** lists every message to you, including acknowledged ones, each with
 your response. If the hub admin withdraws a message, it stays there struck
 through, with the date and the admin's reason. All of this also works while
 you are blocked; the list is then already expanded.
+"Delete" removes a message from this list. It disappears only for you; the
+hub admin keeps it in their history.
 
 ### 12.8 When access has been blocked
 

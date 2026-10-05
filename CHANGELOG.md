@@ -1,5 +1,13 @@
 # Changelog
 
+## 3.7.0 – Oktober 2026
+
+### Neu
+- 🗑 **Mitteilungen vom Hub-Admin löschen.** Unter „Meine Mitteilungen vom
+  Hub-Admin“ hat jeder Eintrag jetzt „Löschen“. Die Mitteilung verschwindet
+  nur bei dir und gilt als gelesen; der Hub-Admin behält sie in seinem
+  Verlauf. Braucht Hub 1.27.0.
+
 ## 3.6.0 – Oktober 2026
 
 ### Neu

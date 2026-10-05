@@ -1148,3 +1148,33 @@ def test_nicht_gesperrte_installation_bekommt_409(client, monkeypatch):
 def test_ohne_hub_und_ohne_sperre_keine_stellungnahme(client):
     r = client.post("/api/hub/sperre/stellungnahme", json={"text": "Hallo"})
     assert r.status_code == 400
+
+
+# ------------------------------------------- Mitteilung löschen (Hub 1.27.0)
+
+def test_mitteilung_loeschen_geht_an_den_hub_und_verschwindet_hier(client, monkeypatch):
+    """05.10.2026: Mitteilungen des Hub-Admins ließen sich nicht entfernen."""
+    core.set_setting("hub_token", "bft_x")
+    core.set_setting("hub_hinweise", '[{"id": 3, "kind": "hinweis"}, {"id": 4, "kind": "verwarnung"}]')
+    aufrufe = []
+    def antwort(method, url, **k):
+        aufrufe.append((method, url))
+        return _Resp(200, {"ok": True, "hidden_at": 55})
+    monkeypatch.setattr(hub.requests, "request", antwort)
+    r = client.delete("/api/hub/hinweise/3")
+    assert r.status_code == 200 and r.json()["hidden_at"] == 55
+    assert aufrufe[-1][0] == "DELETE" and aufrufe[-1][1].endswith("/v1/notices/3")
+    assert [h["id"] for h in client.get("/api/hub").json()["hinweise"]] == [4]
+
+
+def test_schon_geloeschte_mitteilung_ist_kein_fehler(client, monkeypatch):
+    """Ein 404 des Hubs heißt „schon weg“ – die App deutet ein 404 der
+    Instanz dagegen als „Instanz zu alt“, also hier 200."""
+    core.set_setting("hub_token", "t")
+    core.set_setting("hub_hinweise", '[{"id": 3, "kind": "hinweis"}]')
+    def weg(nid):
+        raise hub.HubError(404, "Mitteilung nicht gefunden")
+    monkeypatch.setattr(hub, "hide_notice", weg)
+    r = client.delete("/api/hub/hinweise/3")
+    assert r.status_code == 200 and r.json()["ok"] is True
+    assert client.get("/api/hub").json()["hinweise"] == []

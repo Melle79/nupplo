@@ -312,6 +312,12 @@ def my_notices() -> list:
     return _authed("GET", "/v1/notices").get("notices", [])
 
 
+def hide_notice(notice_id: int) -> dict:
+    """Eine Mitteilung beim Empfänger ausblenden (ab Hub 1.27.0). Sie gilt
+    damit als gelesen; der Hub-Admin behält sie im Verlauf."""
+    return _authed("DELETE", f"/v1/notices/{notice_id}")
+
+
 def reply_notice(notice_id: int, text: str) -> dict:
     """Stellung nehmen (ab Hub 1.25.0). Erneutes Senden ersetzt die alte
     Stellungnahme; 409 heißt: Die Mitteilung ist schon zurückgenommen."""

@@ -187,6 +187,31 @@ def hub_mitteilungen(user: dict = Depends(current_user)):
         raise _mitteilungen_fehler(e)
 
 
+@router.delete("/api/hub/hinweise/{notice_id}")
+def hub_mitteilung_loeschen(notice_id: int, user: dict = Depends(current_user)):
+    """Eine Mitteilung aus „Meine Mitteilungen“ löschen (05.10.2026 gewünscht).
+
+    Ausgeblendet wird sie nur hier; der Hub-Admin behält sie im Verlauf. Kennt
+    der Hub sie nicht (mehr), ist sie ohnehin weg – dann einfach auch hier."""
+    if not hub.enabled():
+        raise HTTPException(400, "Kein Hub verbunden")
+    hidden_at = None
+    try:
+        hidden_at = hub.hide_notice(notice_id).get("hidden_at")
+    except hub.HubError as e:
+        if e.status == 404 and "unbekannter Endpunkt" in (e.message or ""):
+            raise HTTPException(501, "Der Hub kennt das Löschen von Mitteilungen "
+                                     "noch nicht – er muss erst aktualisiert "
+                                     "werden.")
+        if e.status != 404:
+            raise _mitteilungen_fehler(e)
+    except requests.RequestException:
+        raise HTTPException(502, "Hub nicht erreichbar")
+    rest = [h for h in hub.hinweise() if h.get("id") != notice_id]
+    core.set_setting("hub_hinweise", json.dumps(rest))
+    return {"ok": True, "hidden_at": hidden_at, "hinweise": rest}
+
+
 @router.post("/api/hub/hinweise/{notice_id}/stellungnahme")
 def hub_stellungnahme(notice_id: int, body: StellungnahmeBody,
                       user: dict = Depends(current_user)):
