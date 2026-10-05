@@ -2563,6 +2563,8 @@ Mitteilungen an dich, auch bestätigte, jeweils mit deiner Stellungnahme.
 Nimmt der Hub-Admin eine Mitteilung zurück, bleibt sie dort durchgestrichen
 stehen, mit dem Datum und seiner Begründung. Das alles geht auch während
 einer Sperre; die Liste ist dann gleich aufgeklappt.
+Mit „Löschen“ nimmst du eine Mitteilung aus dieser Liste. Sie verschwindet
+nur bei dir; der Hub-Admin behält sie in seinem Verlauf.
 
 ### 12.8 Wenn der Zugang gesperrt wurde
 

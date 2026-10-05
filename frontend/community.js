@@ -268,12 +268,27 @@ async function ladeMitteilungen() {
         { datum: datumText(h.revoked_at) }))}${h.revoke_reason
         ? " " + esc(h.revoke_reason) : ""}</span><br>` : ""}
       ${stellungnahmeText(h)}
-      ${weg || h.ruecknahme_von ? ""
-        : `<div class="hinweis-knoepfe">${stellungnahmeKnopf(h)}</div>`}
+      <div class="hinweis-knoepfe">
+        ${weg || h.ruecknahme_von ? "" : stellungnahmeKnopf(h)}
+        <button class="mini-btn" data-loeschen="${h.id}">${esc(tr("Löschen"))}</button>
+      </div>
       <div class="stellungnahme-form" hidden></div>
     </div>`;
   }).join("");
   verdrahteStellungnahme(liste, m, (r) => zeigeHinweise(r.hinweise || []));
+  // Löschen blendet die Mitteilung nur hier aus; der Hub-Admin behält sie
+  // in seinem Verlauf (05.10.2026 gewünscht).
+  liste.querySelectorAll("[data-loeschen]").forEach((b) => {
+    b.addEventListener("click", async () => {
+      if (!(await frage(tr("Diese Mitteilung löschen? Sie verschwindet nur "
+        + "bei dir, der Hub-Admin behält sie."), { gefahr: true, ok: tr("Löschen") }))) return;
+      try {
+        const r = await api(`/hub/hinweise/${b.dataset.loeschen}`, { method: "DELETE" });
+        zeigeHinweise(r.hinweise || []);
+        ladeMitteilungen();
+      } catch (e) { toast(e.message); }
+    });
+  });
 }
 
 /* Waren die eigenen Angebote pausiert, weil man länger nicht da war? Das
