@@ -700,6 +700,10 @@ def _login_key(request: Request) -> str:
     Header – der ist fälschbar, taugt also nur als grobe Streuung; die
     eigentliche Bremse ist die Zählung je Konto."""
     direkt = request.client.host if request.client else "?"
+    # Über Connect setzt das Gerät die Kopfzeilen selbst; die Herkunft steht
+    # dort im Scope (Vermittler-IP oder feste Kennung je Gerät).
+    if request.scope.get("nupplo.connect"):
+        return direkt
     # Den Kopfzeilen nur glauben, wenn die Anfrage von einem Rechner im
     # eigenen Netz kommt – dort sitzt der Tunnel oder Proxy. Kommt sie direkt
     # aus dem Internet, ist die Absenderadresse echt und die Kopfzeile
@@ -3569,11 +3573,21 @@ def delete_user(user_id: int, user: dict = Depends(admin_user)):
         # Die Push-Anmeldung gehört dagegen nur ihm und geht mit – sonst
         # bekäme sein Gerät weiter Meldungen dieser Instanz.
         conn.execute("DELETE FROM push_subs WHERE user_id = ?", (user_id,))
+        # Ebenso seine gekoppelten Geräte und offenen Kopplungscodes – sonst
+        # kamen sie über den externen Zugriff weiter bis zur Anmeldeseite
+        # (Sicherheitsprüfung 06.10.2026).
+        geraete = [z["schluessel"] for z in conn.execute(
+            "SELECT schluessel FROM connect_geraete WHERE user_id = ?", (user_id,))]
+        conn.execute("DELETE FROM connect_geraete WHERE user_id = ?", (user_id,))
+        conn.execute("DELETE FROM connect_codes WHERE user_id = ?", (user_id,))
         # Seine eigenen Einstellungen (Sprache, Design …) ebenso – sonst erbte
         # sie ein später angelegter Benutzer mit derselben Nummer.
         conn.execute("DELETE FROM benutzer_einstellungen WHERE user_id = ?",
                      (user_id,))
         conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
+    import connect
+    for schluessel in geraete:
+        connect.verbinder.entkoppelt(schluessel)
     return {"ok": True}
 
 

@@ -395,3 +395,102 @@ def test_anmelden_ohne_zweiten_faktor_ueber_connect(instanz):
 def test_nur_admins_setzen_nur_2fa(instanz):
     assert _client(2, "gast", False).post("/api/connect", json={"nur_2fa": True}).status_code == 403
     assert core.get_setting("connect_nur_2fa") != "1"
+
+
+# ------------------------------------------- Sicherheitsprüfung 06.10.2026
+
+def test_geloeschter_benutzer_nimmt_seine_geraete_mit(instanz, monkeypatch):
+    """Wurde ein Benutzer gelöscht, kamen seine gekoppelten Geräte weiter bis
+    zur Anmeldeseite."""
+    gast_code = _client(2, "gast", False).post("/api/connect/koppeln").json()["code"]
+    offener_code = _client(2, "gast", False).post("/api/connect/koppeln").json()["code"]
+    getrennt = []
+    monkeypatch.setattr(instanz, "entkoppelt", getrennt.append)
+
+    async def koppeln():
+        g = Geraet(instanz)
+        assert await g.koppeln({"code": gast_code}) == {"ok": True}
+        return g.s
+    s = lauf(koppeln())
+    assert _client(1, "chefin", True).delete("/api/users/2").status_code == 200
+    assert getrennt == [base64.b64encode(s.public_key().public_bytes_raw()).decode()]
+
+    async def wieder():
+        assert await Geraet(instanz, schluessel=s).koppeln({}) == {"fehler": "nicht-gekoppelt"}
+        assert await Geraet(instanz, kanal=8).koppeln({"code": offener_code}) == \
+            {"fehler": "code-ungueltig"}
+    lauf(wieder())
+
+
+def test_kaputte_nachricht_trifft_nur_ihren_kanal(instanz):
+    """Ein gekoppeltes Gerät riss mit einem zu kurzen Rahmen oder einem
+    kaputten Kopf die Leitung aller Geräte ab."""
+    _, koppeln = _gekoppelt(instanz)
+
+    async def ablauf():
+        g = await koppeln()
+        k = instanz.kanaele[g.kanal]
+        # Kaputter Kopf: nur dieser Strom wird abgebrochen.
+        await k.eingang(g.senden.verschluesseln(b"", connect._strom(3, connect.KOPF, b"{kaputt")))
+        assert g.kanal in instanz.kanaele
+        typen = [g.empfangen.entschluesseln(b"", r[5:])[4] for r in g.leitung.raus if r[0] == connect.DATEN]
+        assert typen == [connect.ABBRUCH]
+        g.leitung.raus.clear()
+        # Zu kurzer Rahmen über die Leitung: nur dieser Kanal geht zu.
+        anderer = Geraet(instanz, kanal=9)
+        anderer.leitung = g.leitung
+        rahmen = connect._rahmen(connect.DATEN, g.kanal, g.senden.verschluesseln(b"", b"\\x00"))
+
+        class Ws:
+            def __aiter__(self):
+                async def gen():
+                    yield rahmen
+                return gen()
+        await instanz._lesen(Ws())
+        assert g.kanal not in instanz.kanaele and 9 in instanz.kanaele
+    lauf(ablauf())
+
+
+def test_anfragekoerper_ist_begrenzt(instanz, monkeypatch):
+    monkeypatch.setattr(connect, "ANFRAGE_MAX", 1000)
+    _, koppeln = _gekoppelt(instanz)
+
+    async def ablauf():
+        g = await koppeln()
+        k = instanz.kanaele[g.kanal]
+        await k.eingang(g.senden.verschluesseln(b"", connect._strom(1, connect.KOPF, json.dumps(
+            {"m": "POST", "w": "/api/sync/push", "k": {}}).encode())))
+        await k.eingang(g.senden.verschluesseln(b"", connect._strom(1, connect.KOERPER, b"x" * 800)))
+        await k.eingang(g.senden.verschluesseln(b"", connect._strom(1, connect.KOERPER, b"x" * 800)))
+        assert 1 not in k.stroeme
+        kopf = json.loads(g.empfangen.entschluesseln(b"", g.leitung.raus[0][5:])[5:])
+        assert kopf["s"] == 413
+    lauf(ablauf())
+
+
+def test_herkunft_kommt_nie_aus_kopfzeilen_des_geraets(instanz):
+    """Ohne IP vom Vermittler galt die Anfrage als „Heimnetz“, und die
+    Ratebremse zählte nach X-Forwarded-For des Geräts – beliebig wechselbar."""
+    _, koppeln = _gekoppelt(instanz)
+    gesehen = []
+    echt = main._login_key
+
+    def merken(request):
+        gesehen.append((echt(request), request.headers.get("x-forwarded-for")))
+        return gesehen[-1][0]
+    main._login_key = merken
+    try:
+        async def ablauf():
+            g = await koppeln()
+            instanz.kanaele[g.kanal].ip = ""
+            for i, ip in enumerate(("198.51.100.1", "198.51.100.2"), start=1):
+                await g.anfrage("POST", "/api/login", {"X-Forwarded-For": ip,
+                                                       "Content-Type": "application/json"},
+                                json.dumps({"username": "chefin", "password": "falsch"}).encode(),
+                                nummer=i)
+        lauf(ablauf())
+    finally:
+        main._login_key = echt
+    assert len(gesehen) == 2
+    assert gesehen[0][0] == gesehen[1][0] and gesehen[0][0].startswith("connect-")
+    assert gesehen[0][1] is None, "die Kopfzeile des Geräts kommt nicht an"
