@@ -78,9 +78,17 @@ Mehrere Ströme laufen gleichzeitig über einen Kanal.
 - **Kopfzeilen gehen unverändert durch** – der Verbinder fügt nichts hinzu
   (Probelauf: `requests` hängte `Accept-Encoding: gzip` an, Fotos kamen
   gepackt an). Nur Verbindungskopfzeilen (`Host`, `Connection`,
-  `Content-Length`, …) fallen weg.
+  `Content-Length`, …) fallen weg – und die Herkunftskopfzeilen
+  (`X-Forwarded-For`, `CF-Connecting-IP`, `X-Real-IP`, `Forwarded`,
+  `True-Client-IP`, `CF-Ray`, `Cf-Access-Jwt-Assertion`): Die setzt hier das
+  Gerät selbst.
 - Die IP aus `OEFFNEN` gibt der Verbinder der Instanz als Absender mit –
-  sonst bremst die Sperre gegen Passwortraten alle Geräte gemeinsam.
+  sonst bremst die Sperre gegen Passwortraten alle Geräte gemeinsam. Fehlt
+  sie, gilt eine feste Kennung je Gerät (`connect-…`), nie eine Kopfzeile.
+- Gepufferte Anfragekörper sind je Kanal auf 160 MB begrenzt; darüber
+  antwortet die Instanz auf dem Strom mit `413`. Ein kaputter `KOPF` beendet
+  nur diesen Strom (`ABBRUCH`), ein unlesbarer Rahmen nur diesen Kanal – nie
+  die Leitung der anderen Geräte.
 
 ## 4. Verschlüsselung und Koppeln (Noise IK)
 

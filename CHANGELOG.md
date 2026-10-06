@@ -1,5 +1,21 @@
 # Changelog
 
+## 3.7.1 – Oktober 2026
+
+### Sicherheit (externer Zugriff ohne Portfreigabe)
+- 🔒 **Gelöschte Benutzer nehmen ihre gekoppelten Geräte mit.** Bisher
+  blieben die Geräte stehen und kamen weiter bis zur Anmeldeseite. Jetzt
+  verschwinden sie samt offenen Kopplungscodes, und bestehende Verbindungen
+  werden sofort getrennt.
+- 🔒 **Eine kaputte Nachricht trifft nur ihre eigene Verbindung.** Ein
+  gekoppeltes Gerät konnte mit einer fehlerhaften Nachricht die Leitung für
+  alle Geräte kurz abreißen lassen. Außerdem sind Anfragen je Verbindung auf
+  160 MB begrenzt; darüber gibt es „413“.
+- 🔒 **Die Herkunft kommt nie aus Kopfzeilen des Geräts.** Fehlte die
+  Adresse vom Vermittler, zählte die Bremse gegen Passwortraten nach der
+  vom Gerät gesetzten Absender-Kopfzeile. Solche Kopfzeilen werden jetzt
+  verworfen; ohne Adresse zählt eine feste Kennung je Gerät.
+
 ## 3.7.0 – Oktober 2026
 
 ### Neu

@@ -64,6 +64,15 @@ LEBENSZEICHEN = 30
 # Kopfzeilen, die nur für eine Verbindung gelten.
 VERBINDUNGSKOPF = {"host", "connection", "keep-alive", "transfer-encoding",
                    "content-length", "upgrade", "proxy-connection", "te"}
+# Kopfzeilen, mit denen ein Proxy die echte Herkunft meldet. Über Connect
+# setzt sie das Gerät selbst – geglaubt wird ihnen hier nie (06.10.2026:
+# ohne Vermittler-IP zählte sonst die Ratebremse nach Angaben des Geräts).
+HERKUNFTSKOPF = {"cf-connecting-ip", "x-forwarded-for", "x-real-ip", "forwarded",
+                 "true-client-ip", "cf-ray", "cf-access-jwt-assertion"}
+# So viel darf ein Gerät je Kanal gleichzeitig an Anfragekörpern schicken.
+# Reicht für eine Sicherung samt Bildern (UPLOADS_MAX 150 MB); bisher war
+# der Puffer unbegrenzt.
+ANFRAGE_MAX = 160 * 1024 * 1024
 # Woran die Instanz erkennt, dass eine Anfrage über Connect kam: ein Eintrag
 # im ASGI-Scope, keine Kopfzeile – die ließe sich von außen fälschen.
 SCOPE_MARKE = "nupplo.connect"
@@ -229,10 +238,28 @@ class Kanal:
         except noise.NoiseFehler:
             await self.schliessen(melden=True)
             return
+        if len(klar) < 5:
+            # Kein Strom-Kopf: kaputt – nur dieser Kanal geht zu, nicht die
+            # Leitung aller Geräte (06.10.2026).
+            await self.schliessen(melden=True)
+            return
         nummer, typ, inhalt = int.from_bytes(klar[:4], "big"), klar[4], klar[5:]
         if typ == KOPF:
-            self.stroeme[nummer] = {"kopf": json.loads(inhalt), "koerper": bytearray()}
+            try:
+                kopf = json.loads(inhalt)
+                if not isinstance(kopf, dict):
+                    raise ValueError
+            except ValueError:
+                await self.schicken(nummer, ABBRUCH)
+                return
+            self.stroeme[nummer] = {"kopf": kopf, "koerper": bytearray()}
         elif typ == KOERPER and nummer in self.stroeme:
+            gepuffert = sum(len(st["koerper"]) for st in self.stroeme.values())
+            if gepuffert + len(inhalt) > ANFRAGE_MAX:
+                self.stroeme.pop(nummer)
+                await self.schicken(nummer, KOPF, json.dumps({"s": 413, "k": {}}).encode())
+                await self.schicken(nummer, ENDE)
+                return
             self.stroeme[nummer]["koerper"] += inhalt
         elif typ == ENDE and nummer in self.stroeme:
             anfrage = self.stroeme.pop(nummer)
@@ -407,7 +434,14 @@ class Verbinder:
                 if k:
                     await k.schliessen(melden=False)
             elif art == DATEN and nummer in self.kanaele:
-                await self.kanaele[nummer].eingang(nutzlast)
+                kanal = self.kanaele[nummer]
+                try:
+                    await kanal.eingang(nutzlast)
+                except Exception as e:
+                    # Was ein einzelnes Gerät schickt, darf die Leitung der
+                    # anderen nicht abreißen – nur sein Kanal geht zu.
+                    log("Kanal geschlossen:", type(e).__name__, e)
+                    await kanal.schliessen(melden=True)
 
     # --- Anfragen an den eigenen Server, im Prozess
 
@@ -416,7 +450,7 @@ class Verbinder:
         pfad, _, abfrage = weg.partition("?")
         kopfzeilen = [(str(n).lower().encode("latin-1"), str(w).encode("latin-1"))
                       for n, w in (kopf.get("k") or {}).items()
-                      if str(n).lower() not in VERBINDUNGSKOPF]
+                      if str(n).lower() not in VERBINDUNGSKOPF | HERKUNFTSKOPF]
         kopfzeilen.append((b"host", b"nupplo-connect"))
         scope = {
             "type": "http", "asgi": {"version": "3.0"}, "http_version": "1.1",
@@ -426,7 +460,10 @@ class Verbinder:
             "headers": kopfzeilen,
             # Die Adresse des Geräts, wie sie beim Vermittler ankam – sonst
             # bremst die Sperre gegen Passwortraten alle Geräte gemeinsam.
-            "client": (kanal.ip or "0.0.0.0", 0),
+            # Fehlt sie, eine feste Kennung je Gerät statt „0.0.0.0“ – die
+            # galt als Heimnetz, und dann zählten Kopfzeilen des Geräts.
+            "client": (kanal.ip or "connect-" + hashlib.sha256(
+                (kanal.geraet or "").encode()).hexdigest()[:16], 0),
             "server": ("nupplo-connect", 443),
             SCOPE_MARKE: True,
         }
