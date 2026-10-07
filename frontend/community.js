@@ -239,22 +239,22 @@ async function zeigeSperrStellungnahme(boxId) {
 /* Der eigene Verlauf: alle Mitteilungen, auch bestätigte und
    zurückgenommene. Geht auch während einer Sperre – dann ist er gleich
    aufgeklappt, denn oben steht sonst nur „gesperrt“. */
+/* Der Kasten steht nur da, wenn er etwas enthält: Den Hub-Admin
+   anschreiben kann man von hier nicht, ein leerer Kasten führt also
+   nirgendwohin (07.10.2026). Sind alle gelöscht, verschwindet er. */
+let hubVerwaist = false;
 async function ladeMitteilungen() {
   const box = $("hub-mitteilungen");
   const liste = $("hub-mitteilungen-liste");
-  if (box.hidden || !box.open) return;
-  liste.textContent = tr("Lädt …");
+  if (hubVerwaist) { box.hidden = true; return; }
   let m;
   try {
     m = (await api("/hub/mitteilungen")).mitteilungen || [];
-  } catch (e) {
-    liste.textContent = e.message;
-    return;
+  } catch (_) {
+    m = [];                     // Hub zu alt oder nicht erreichbar
   }
-  if (!m.length) {
-    liste.textContent = tr("Bisher keine Mitteilungen vom Hub-Admin.");
-    return;
-  }
+  box.hidden = !m.length;
+  if (!m.length || !box.open) return;
   liste.innerHTML = m.map((h) => {
     const weg = !!h.revoked_at;
     return `
@@ -332,9 +332,8 @@ async function loadHubView() {
     if (s.blocked) zeigeSperrStellungnahme("hub-sperre-stellung");
     else $("hub-sperre-stellung").innerHTML = "";
     zeigeHinweise(s.hinweise || []);
-    const mb = $("hub-mitteilungen");
-    mb.hidden = !!s.verwaist;
-    if (s.blocked) mb.open = true;
+    hubVerwaist = !!s.verwaist;
+    if (s.blocked) $("hub-mitteilungen").open = true;
     ladeMitteilungen();
     zeigePause(s);
     const lp = s.last_publish;

@@ -1,5 +1,13 @@
 # Changelog
 
+## 3.7.2 – Oktober 2026
+
+### Geändert
+- 📣 **„Meine Mitteilungen vom Hub-Admin“ erscheint nur, wenn etwas drin
+  ist.** Bisher stand der Kasten im Tausch-Tab auch leer da – obwohl man den
+  Hub-Admin von dort gar nicht anschreiben kann. Sind alle Mitteilungen
+  gelöscht, verschwindet er.
+
 ## 3.7.1 – Oktober 2026
 
 ### Sicherheit (externer Zugriff ohne Portfreigabe)
