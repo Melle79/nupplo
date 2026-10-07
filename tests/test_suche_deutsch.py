@@ -400,3 +400,40 @@ def test_die_gattung_stoert_andere_anfragen_nicht():
     """Was kein Gattungswort enthält, darf sich nicht ändern."""
     assert woerterbuch.anfrage_teilen("roter Droide") == ["roter", "droide"]
     assert woerterbuch.uebersetzen("gelber Kopf") == ["yellow head"]
+
+
+# ── Baden, Schlafen, Freizeit (07.10.2026) ────────────────────────────
+
+def test_badehose_findet_den_hot_tub_stormtrooper(client, monkeypatch):
+    """„Badehose" fand nichts: „Bade" fehlte, und ein unbekanntes Wort ist
+    ein Pflichtwort – die Suche lief leer."""
+    monkeypatch.setattr(integrations, "ollama_enabled", lambda: False)
+    _katalog([("sw1479", "Stormtrooper, Hot Tub, Swim Trunks", "white"),
+              ("sw0001", "Stormtrooper, Black Head", "white")])
+    fassungen = integrations.suchbegriffe("Badehose")
+    assert fassungen and fassungen[0] == "swim trunks"
+    treffer = main._katalog_lauf_suchen(fassungen[0], 20, "minifig")
+    assert [t["item_id"] for t in treffer] == ["sw1479"]
+    assert woerterbuch.uebersetzen("whirlpool stormtrooper") == ["hot tub stormtrooper"]
+
+
+def test_alltagswoerter_rund_um_kleidung_und_freizeit():
+    for wort, erwartet in (("schlafanzug", "pajamas"), ("bademantel", "bathrobe"),
+                           ("trainingsanzug", "tracksuit"), ("laborkittel", "lab coat"),
+                           ("fliege", "bow tie"), ("schlittschuhe", "ice skates"),
+                           ("rettungsring", "life preserver"), ("bade", "swim")):
+        assert woerterbuch.nachschlagen(wort)[0] == erwartet, wort
+
+
+def test_unbekannter_vorderteil_laesst_die_suche_nicht_leer():
+    """Der hintere Teil trägt die Bedeutung: Auch eine unbekannte
+    „Quatschhose" ist eine Hose – statt ein Pflichtwort, das nichts findet."""
+    assert woerterbuch.nachschlagen("quatschhose") == ("pants", "trousers")
+    assert woerterbuch.uebersetzen("rote quatschhose")[0] == "red pants"
+
+
+def test_namen_haengen_nicht_an_zufaelligen_endungen():
+    for name in ("skywalker", "dumbledore", "palpatine", "weasley", "hagrid",
+                 "chewbacca", "voldemort", "spiderman", "garmadon", "kenobi"):
+        assert woerterbuch.nachschlagen(name) == (), name
+    assert woerterbuch.nachschlagen("hermine") == ("hermione",)

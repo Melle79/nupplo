@@ -1,5 +1,19 @@
 # Changelog
 
+## 3.7.3 – Oktober 2026
+
+### Behoben
+- 🔎 **„Badehose" findet etwas.** Das Wort fehlte im mitgelieferten
+  Wörterbuch, und ein unbekanntes Wort zählt als Pflichtwort – die Suche
+  lief leer, obwohl eine Figur in Badehose im Katalog steht. Ergänzt sind
+  Badehose, Whirlpool, Bademantel, Schlafanzug, Trainingsanzug, Laborkittel,
+  Fliege, Schlittschuhe, Rettungsring und weitere Alltagswörter rund um
+  Kleidung und Freizeit.
+- 🔎 **Ein unbekannter Wortteil leert die Suche nicht mehr.** Kennt die
+  Liste den vorderen Teil eines zusammengesetzten Worts nicht, gilt
+  wenigstens der hintere – eine „Quatschhose" ist eine Hose. Namen wie
+  Skywalker oder Dumbledore bleiben unangetastet.
+
 ## 3.7.2 – Oktober 2026
 
 ### Geändert
