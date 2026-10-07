@@ -1385,6 +1385,47 @@ WOERTERBUCH.update({
     "waechter": ("guard", "guardian"), "wächter": ("guard", "guardian"),
     "koch": ("chef", "cook"), "koechin": ("chef", "cook"),
 })
+# ── Baden, Schlafen, Freizeit (07.10.2026) ────────────────────────────
+# „Badehose" fand nichts: „Bade" stand nicht in der Liste, und ein
+# unbekanntes Wort zählt als Pflichtwort – die Suche lief leer, obwohl der
+# Hot-Tub-Stormtrooper eine trägt. Dazu dieselbe Sorte Alltagswörter rund
+# um Kleidung und Freizeit, die bis dahin ebenso ins Leere gingen.
+WOERTERBUCH.update({
+    "bade": ("swim", "bath"), "bad": ("bath",),
+    "badehose": ("swim trunks", "trunks", "swimsuit", "shorts"),
+    "badeshorts": ("swim trunks", "trunks", "swimsuit", "shorts"),
+    "badeanzug": ("swimsuit", "bathing suit"),
+    "bikini": ("bikini", "swimsuit"),
+    "badekappe": ("swim cap",), "badehaube": ("swim cap",),
+    "bademantel": ("bathrobe", "robe"),
+    "badewanne": ("bathtub",), "dusche": ("shower",),
+    "whirlpool": ("hot tub",), "pool": ("pool",),
+    "schwimmbad": ("pool",), "planschbecken": ("pool",),
+    "sauna": ("sauna",),
+    "schwimmen": ("swim", "swimming"), "schwimmer": ("swimmer",),
+    "schwimmerin": ("swimmer",),
+    "schwimmbrille": ("goggles",), "taucherbrille": ("goggles", "dive mask"),
+    "neoprenanzug": ("wetsuit", "diving suit"),
+    "rettungsring": ("life preserver", "life ring"),
+    "bademeister": ("lifeguard",), "rettungsschwimmer": ("lifeguard",),
+    "flipflops": ("flip flops",), "badeschlappen": ("flip flops",),
+    "schlafanzug": ("pajamas", "pyjamas"), "pyjama": ("pajamas", "pyjamas"),
+    "trainingsanzug": ("tracksuit",), "jogginghose": ("sweatpants",),
+    "gummistiefel": ("rubber boots", "boots"),
+    "fliege": ("bow tie",), "smoking": ("tuxedo",),
+    "kittel": ("lab coat", "smock"), "laborkittel": ("lab coat",),
+    "pullunder": ("sweater vest",), "daunenjacke": ("puffer jacket", "jacket"),
+    "latz": ("bib",), "laetzchen": ("bib",), "lätzchen": ("bib",),
+    "windel": ("diaper",),
+    "schlittschuh": ("ice skates", "skates"),
+    "schlittschuhe": ("ice skates", "skates"),
+    "eislaeufer": ("skater",), "eisläufer": ("skater",),
+    "snowboarder": ("snowboarder", "snowboard"),
+    # Der deutsche Name ist kein Kopf-Rest: „Hermine" ist Hermione, nicht
+    # „mine".
+    "hermine": ("hermione",),
+})
+
 # ══════════════════════════════════════════════════════════════════════
 # Nachschlagen
 #
@@ -1455,12 +1496,34 @@ def _zerlegen(wort: str, tiefe: int = 0) -> tuple:
     return ()
 
 
+# Der hintere Teil eines deutschen Worts trägt die Bedeutung – eine
+# Badehose ist eine Hose. Kennen wir den vorderen Teil nicht, gilt
+# wenigstens der hintere; mindestens so lang, damit Eigennamen nicht an
+# zufälligen Endungen hängen bleiben.
+MINDESTKOPF = 4
+
+
+def _kopf(wort: str) -> tuple:
+    """Stufe 4: nur den hinteren Teil, wenn der vordere unbekannt ist.
+
+    Vorher zählte das ganze Wort als unbekannt und damit als Pflichtwort,
+    und die Suche lief leer (07.10.2026, „Badehose")."""
+    w = _falten(wort)
+    for start in range(MINDESTTEIL, len(w) - MINDESTKOPF + 1):
+        # Nur ganze Einträge, keine abgeschnittenen Endungen – sonst
+        # rät das Wort an Namen herum.
+        treffer = WOERTERBUCH.get(w[start:])
+        if treffer:
+            return treffer
+    return ()
+
+
 def nachschlagen(wort: str) -> tuple:
     """Alle englischen Entsprechungen zu einem deutschen Wort."""
     wort = (wort or "").strip().lower()
     if not wort:
         return ()
-    return _direkt(wort) or _zerlegen(wort)
+    return _direkt(wort) or _zerlegen(wort) or _kopf(wort)
 
 
 # Wörter, die aus der Anfrage **verschwinden**, statt übersetzt zu werden.
