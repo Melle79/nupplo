@@ -437,3 +437,37 @@ def test_namen_haengen_nicht_an_zufaelligen_endungen():
                  "chewbacca", "voldemort", "spiderman", "garmadon", "kenobi"):
         assert woerterbuch.nachschlagen(name) == (), name
     assert woerterbuch.nachschlagen("hermine") == ("hermione",)
+
+
+def test_liste_kommt_neben_gelerntem_vom_modell_zu_wort(client, monkeypatch):
+    """Gelernt war „badehose stormtrooper" → `stormtrooper helmet`, aus der
+    Zeit vor „Badehose" in der Liste. Das fand Stormtrooper – nie den in
+    Badehose (08.10.2026)."""
+    monkeypatch.setattr(integrations, "ollama_enabled", lambda: False)
+    integrations.begriffe_merken("badehose stormtrooper", ["stormtrooper helmet"])
+    fassungen = integrations.suchbegriffe("badehose stormtrooper", nur_liste=True)
+    assert fassungen[0] == "swim trunks stormtrooper"
+    # Von Hand Gepflegtes bleibt vorn.
+    integrations.begriffe_merken("badehose stormtrooper", ["hot tub"], quelle="hand")
+    assert integrations.suchbegriffe("badehose stormtrooper", nur_liste=True) == ["hot tub"]
+
+
+def test_eigene_sammlung_findet_ueber_die_bildbeschreibung(client, monkeypatch):
+    """Der „Hot Tub Stormtrooper" heißt nicht nach seiner Badehose – sie
+    steht nur in der Beschreibung. Die eigene Sammlung fand ihn deshalb
+    nicht, obwohl er darin lag (08.10.2026)."""
+    monkeypatch.setattr(integrations, "ollama_enabled", lambda: False)
+    with core.db() as conn:
+        conn.execute(
+            "INSERT INTO katalog_index (item_no, item_type, name, such, woerter,"
+            " farben, merkmale, updated_at) VALUES ('sw1479', 'minifig',"
+            " 'Hot Tub Stormtrooper', ?, ?, 'white',"
+            " 'legs medium nougat with red swim trunks with imperial logo', 0)",
+            (core.wortanfaenge("Hot Tub Stormtrooper")[0],
+             core.suchwoerter("Hot Tub Stormtrooper")))
+        conn.execute(
+            "INSERT INTO collection (item_id, item_type, name, img_url,"
+            " bricklink_url, quantity, condition, added_at) VALUES"
+            " ('sw1479', 'minifig', 'Hot Tub Stormtrooper', 'i', 'b', 2, 'used', 0)")
+    r = client.get("/api/collection/suggest", params={"q": "Badehose"}).json()
+    assert [e["item_id"] for e in r["items"]] == ["sw1479"]

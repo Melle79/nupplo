@@ -6808,6 +6808,30 @@ def _reihum(je_begriff: list, kennung, gesehen: set,
     return items, treffer
 
 
+def _beschrieben(begriff: str, item_type: str) -> set:
+    """Welche Katalognummern trifft ein Begriff über Name **oder**
+    Bildbeschreibung? Dieselbe Suche wie im Katalog – mit ihren Regeln für
+    Wörter, die in fast jeder Beschreibung stehen."""
+    arten = [item_type] if item_type else ["minifig", "set"]
+    return {t["item_id"] for art in arten
+            for t in _katalog_suchen(begriff, SUGGEST_MAX, art)}
+
+
+def _passt_eintrag(begriff: str, eintrag: dict, item_type: str,
+                   merker: dict) -> bool:
+    """Trifft ein Begriff diesen Sammlungseintrag?
+
+    Bisher nur über den Namen. Der „Hot Tub Stormtrooper" heißt aber nicht
+    nach seiner Badehose – die steht nur in der Bildbeschreibung. Die
+    Katalogsuche fand ihn darüber, die eigene Sammlung nicht, obwohl er
+    zweimal darin lag (08.10.2026). `merker` gilt je Anfrage."""
+    if _passt(begriff, eintrag.get("name") or ""):
+        return True
+    if begriff not in merker:
+        merker[begriff] = _beschrieben(begriff, item_type)
+    return eintrag.get("item_id") in merker[begriff]
+
+
 @app.get("/api/collection/suggest")
 def suggest_collection(q: str = "", item_type: str = "",
                        user: dict = Depends(current_user)):
@@ -6842,6 +6866,7 @@ def suggest_collection(q: str = "", item_type: str = "",
     alle = get_collection(q="", sort="name", item_type=item_type,
                           user=user)["items"]
     gesehen: set = set()
+    merker: dict = {}
     # Der genaueste Begriff zuerst, nicht der vom Modell zuerst genannte.
     # „roter c3 po" ergibt `C-3PO` und `C-3PO (red)`; in Modellreihenfolge
     # sammelte der breite Begriff alle C-3POs ein, und die Farbvariante kam
@@ -6855,7 +6880,7 @@ def suggest_collection(q: str = "", item_type: str = "",
     # zuerst und die Oberbegriffe zuletzt.
     begriffe.sort(key=lambda b: len(_such_woerter(b)), reverse=True)
     eng, weit = _teilmengen_teilen(
-        [(b, [e for e in alle if _passt(b, e["name"] or "")])
+        [(b, [e for e in alle if _passt_eintrag(b, e, item_type, merker)])
          for b in begriffe])
     items, treffer = _reihum(eng, lambda e: e["id"], gesehen)
     if len(items) < BREITER_AB and weit:
@@ -6872,7 +6897,7 @@ def suggest_collection(q: str = "", item_type: str = "",
         if begriffe:
             begriffe.sort(key=lambda b: len(_such_woerter(b)), reverse=True)
             eng, weit = _teilmengen_teilen(
-                [(b, [e for e in alle if _passt(b, e["name"] or "")])
+                [(b, [e for e in alle if _passt_eintrag(b, e, item_type, merker)])
                  for b in begriffe])
             items, treffer = _reihum(eng, lambda e: e["id"], gesehen)
             if len(items) < BREITER_AB and weit:

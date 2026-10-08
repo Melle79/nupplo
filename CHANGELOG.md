@@ -1,5 +1,18 @@
 # Changelog
 
+## 3.7.4 – Oktober 2026
+
+### Behoben
+- 🔎 **„Badehose Stormtrooper" findet den Stormtrooper in Badehose.** Für
+  diese Anfrage hatte sich die Instanz früher eine Übersetzung vom Modell
+  gemerkt (`stormtrooper helmet`), und die ging der Liste vor – auch
+  nachdem die Liste „Badehose" kannte. Jetzt stehen die Fassungen der
+  Liste vorn, das Gelernte dahinter, und gesucht wird mit allen.
+- 🔎 **Die eigene Sammlung findet auch über die Bildbeschreibung.** Bisher
+  verglich der zweite Anlauf dort nur Namen. Eine Figur, deren Badehose
+  nur in der Beschreibung steht, fand die Katalogsuche, die eigene
+  Sammlung aber nicht.
+
 ## 3.7.3 – Oktober 2026
 
 ### Behoben
