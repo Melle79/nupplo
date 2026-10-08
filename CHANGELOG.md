@@ -1,5 +1,15 @@
 # Changelog
 
+## 3.8.1 – Oktober 2026
+
+### Geändert
+- 📘 **Der Verweis auf die Bauanleitungen steht nicht mehr in der
+  Hauptansicht.** Beim Set in der Sammlung liegt er im Steckbrief unter
+  **Mehr → Nachschlagen**, neben Preisverlauf und BrickLink; im
+  Katalogfenster hinter **Mehr ▾** neben „Bei BrickLink ansehen“. Das 📘
+  neben den Sets einer Figur ist weg – wer die Anleitung sucht, öffnet das
+  Set und findet sie dort unter „Mehr“.
+
 ## 3.8.0 – Oktober 2026
 
 ### Neu
