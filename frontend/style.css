@@ -3552,3 +3552,8 @@ button.cm-chip { cursor: pointer; min-height: 30px; }
 .hinweis-knoepfe { display: flex; flex-wrap: wrap; gap: 8px; margin: 6px 0 4px; }
 .hinweis-knoepfe .mini-btn { flex: none; padding: 6px 14px; font-size: 13px; }
 #hub-sperre-stellung:empty { display: none; }
+
+/* Der Verweis auf die Bauanleitung liegt im Katalogfenster hinter „Mehr“,
+   nicht in der Hauptansicht (08.10.2026). */
+.kat-mehr { margin-top: 6px; text-align: center; }
+.kat-mehr summary { cursor: pointer; font-weight: 700; color: var(--muted); }

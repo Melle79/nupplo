@@ -964,9 +964,7 @@ function applySuggestInfo(info, withDetail, geprueft) {
           if (seen.has(s.no)) return;
           seen.add(s.no);
           links.push(`<a class="set-link ext" href="https://www.bricklink.com/v2/catalog/catalogitem.page?S=${encodeURIComponent(s.no)}" target="_blank" rel="noopener">`
-            + `${esc(s.name)} (${esc(s.no)}${s.qty > 1 ? `, ${s.qty}×` : ""})</a>`
-            + (bauanleitungSichtbar() && bauanleitungUrl(s.no)
-              ? ` <a class="set-link ext" href="${esc(bauanleitungUrl(s.no))}" target="_blank" rel="noopener noreferrer" title="${esc(tr("Bauanleitung"))}">📘</a>` : ""));
+            + `${esc(s.name)} (${esc(s.no)}${s.qty > 1 ? `, ${s.qty}×` : ""})</a>`);
         });
         // Gehört zu einem eigenen Set und fehlt noch? Dann deutlich sagen.
         const missingForOwn = d.in_sets && !(d.owned > 0);
@@ -5909,7 +5907,11 @@ function katDetail(e) {
       </div>
       <a class="kat-modal-link" href="${bl}" target="_blank" rel="noopener">
         ${esc(tr("Bei BrickLink ansehen"))}</a>
-      ${katStand.art === "set" ? bauanleitungLink(e.item_no, "kat-modal-link") : ""}
+      ${katStand.art === "set" && bauanleitungLink(e.item_no) ? `
+      <details class="kat-mehr">
+        <summary>${esc(tr("Mehr"))} ▾</summary>
+        ${bauanleitungLink(e.item_no, "kat-modal-link")}
+      </details>` : ""}
     </div>`;
   const zu = () => { overlay.remove(); document.removeEventListener("keydown", taste); };
   const taste = (ev) => { if (ev.key === "Escape") zu(); };
