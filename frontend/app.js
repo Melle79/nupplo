@@ -964,7 +964,9 @@ function applySuggestInfo(info, withDetail, geprueft) {
           if (seen.has(s.no)) return;
           seen.add(s.no);
           links.push(`<a class="set-link ext" href="https://www.bricklink.com/v2/catalog/catalogitem.page?S=${encodeURIComponent(s.no)}" target="_blank" rel="noopener">`
-            + `${esc(s.name)} (${esc(s.no)}${s.qty > 1 ? `, ${s.qty}×` : ""})</a>`);
+            + `${esc(s.name)} (${esc(s.no)}${s.qty > 1 ? `, ${s.qty}×` : ""})</a>`
+            + (bauanleitungSichtbar() && bauanleitungUrl(s.no)
+              ? ` <a class="set-link ext" href="${esc(bauanleitungUrl(s.no))}" target="_blank" rel="noopener noreferrer" title="${esc(tr("Bauanleitung"))}">📘</a>` : ""));
         });
         // Gehört zu einem eigenen Set und fehlt noch? Dann deutlich sagen.
         const missingForOwn = d.in_sets && !(d.owned > 0);
@@ -2855,6 +2857,8 @@ function showApp() {
     // Übersetzt wird auch ohne Modell – siehe `such_uebersetzung`.
     state.uebersetzt = c.such_uebersetzung !== false;
     state.jedipedia = !!c.jedipedia;
+    state.bauanleitung = c.bauanleitung || "aus";
+    if ($("opt-bauanleitung")) $("opt-bauanleitung").value = state.bauanleitung;
     if ($("opt-jedipedia")) $("opt-jedipedia").checked = state.jedipedia;
     state.angebote = !!c.angebotspreise;
     if ($("opt-angebote")) $("opt-angebote").checked = state.angebote;
@@ -4810,10 +4814,12 @@ function collCardDetails(it) {
         </div>` : ""}`;
 
   const nachschlagen = `
-        ${priceGuideUrl(it) || it.bricklink_url ? `
+        ${priceGuideUrl(it) || it.bricklink_url
+          || (it.item_type === "set" && bauanleitungLink(it.item_id)) ? `
         <div class="detail-row btn-grid">
           ${priceGuideUrl(it) ? `<a class="mini-btn link" href="${esc(priceGuideUrl(it))}" target="_blank" rel="noopener">Preisverlauf ↗</a>` : ""}
           ${it.bricklink_url ? `<a class="mini-btn link" href="${esc(it.bricklink_url)}" target="_blank" rel="noopener">BrickLink ↗</a>` : ""}
+          ${it.item_type === "set" ? bauanleitungLink(it.item_id) : ""}
         </div>` : ""}
         ${it.item_type === "set" && state.bricklinkPrices ? `
         <div class="detail-row">
@@ -5903,6 +5909,7 @@ function katDetail(e) {
       </div>
       <a class="kat-modal-link" href="${bl}" target="_blank" rel="noopener">
         ${esc(tr("Bei BrickLink ansehen"))}</a>
+      ${katStand.art === "set" ? bauanleitungLink(e.item_no, "kat-modal-link") : ""}
     </div>`;
   const zu = () => { overlay.remove(); document.removeEventListener("keydown", taste); };
   const taste = (ev) => { if (ev.key === "Escape") zu(); };
@@ -12621,6 +12628,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   katThemenVerdrahten();
   katKategorienVerdrahten();
   jedipediaVerdrahten();
+  bauanleitungVerdrahten();
   angeboteVerdrahten();
   nachObenVerdrahten();
   $("btn-restore").addEventListener("click", () => $("restore-file").click());
@@ -13434,6 +13442,57 @@ function angeboteVerdrahten() {
     } catch (e) {
       schalter.checked = !an;
       state.angebote = !an;
+      toast(tr("Ging nicht."));
+    }
+  });
+}
+
+/* ── Bauanleitung bei LEGO ─────────────────────────────────────────
+   Ein Verweis auf LEGOs Seite mit den Bauanleitungen zu einer Setnummer
+   (08.10.2026 gewünscht). Die Adresse gibt es für jede Nummer; ob LEGO
+   dort eine Anleitung hat, zeigt erst die Seite – bei Sets ab etwa 1999
+   fast immer (stichprobenartig geprüft), bei ganz alten oft nicht.
+   Artikelseiten verlinken wir bewusst nicht: Die gibt es nur für Sets,
+   die gerade verkauft werden.
+
+   Wahl je Benutzer: aus (Vorgabe), nur Browseransicht, nur Handyansicht
+   oder beides. „Handy" heißt die schmale Darstellung – dieselbe Grenze
+   wie im Stil (560 px). */
+const BAUANLEITUNG_SCHMAL = "(max-width: 560px)";
+
+function bauanleitungSichtbar() {
+  const wo = state.bauanleitung || "aus";
+  if (wo === "beide") return true;
+  if (wo === "aus") return false;
+  const schmal = window.matchMedia(BAUANLEITUNG_SCHMAL).matches;
+  return wo === "handy" ? schmal : !schmal;
+}
+
+function bauanleitungUrl(setNr) {
+  const nr = String(setNr || "").replace(/-\d+$/, "");
+  if (!/^\d{3,7}$/.test(nr)) return "";
+  return `https://www.lego.com/${lang === "en" ? "en-gb" : "de-de"}`
+    + `/service/building-instructions/${encodeURIComponent(nr)}`;
+}
+
+function bauanleitungLink(setNr, klasse = "mini-btn link") {
+  if (!bauanleitungSichtbar()) return "";
+  const url = bauanleitungUrl(setNr);
+  return url ? `<a class="${klasse}" href="${esc(url)}" target="_blank"
+    rel="noopener noreferrer">${esc(tr("Bauanleitung"))} ↗</a>` : "";
+}
+
+function bauanleitungVerdrahten() {
+  const wahl = $("opt-bauanleitung");
+  if (!wahl) return;
+  wahl.addEventListener("change", async () => {
+    const vorher = state.bauanleitung;
+    state.bauanleitung = wahl.value;
+    try {
+      await api("/settings/bauanleitung", { method: "POST", body: { wo: wahl.value } });
+    } catch (e) {
+      wahl.value = vorher;
+      state.bauanleitung = vorher;
       toast(tr("Ging nicht."));
     }
   });
