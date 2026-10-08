@@ -1226,15 +1226,25 @@ def suchbegriffe(q: str, nur_liste: bool = False) -> list:
         return gelernt
     # **Das mitgelieferte Wörterbuch, vor dem Modell – aber nur, wenn es
     # die *ganze* Anfrage kennt.** Es kostet nichts, antwortet immer gleich
-    # und braucht keine KI (siehe `woerterbuch.py`). Gelerntes hat Vorrang:
-    # Was auf dieser Instanz schon einmal getroffen hat, weiß mehr über
-    # diese Sammlung als eine allgemeine Liste.
+    # und braucht keine KI (siehe `woerterbuch.py`). Gelerntes bleibt im
+    # Spiel: Was auf dieser Instanz schon einmal getroffen hat, weiß mehr
+    # über diese Sammlung als eine allgemeine Liste – aber nicht alles.
     halb = []
-    if not gelernt:
-        ganz = woerterbuch.uebersetzen(q, nur_ganz=True)
-        if ganz:
-            return ganz[:4]
+    ganz = woerterbuch.uebersetzen(q, nur_ganz=True)
+    if ganz and not gelernt:
+        return ganz[:4]
+    if not ganz:
         halb = woerterbuch.uebersetzen(q)
+    if gelernt and (ganz or halb):
+        # **Die Liste kommt neben Gelerntem aus dem Modell zu Wort.**
+        # Gelernt war etwa „badehose stormtrooper" → `stormtrooper helmet`,
+        # aus der Zeit, als die Liste „Badehose" noch nicht kannte – das
+        # fand Stormtrooper, aber nie den in Badehose (08.10.2026). Jetzt
+        # stehen die beiden ersten Fassungen der Liste vorn, das Gelernte
+        # dahinter; gesucht wird mit allen.
+        liste = ganz or halb
+        zusammen = liste[:2] + [g for g in gelernt if g not in liste[:2]] + liste[2:]
+        gelernt = list(dict.fromkeys(zusammen))[:4]
     if nur_liste:
         # **Erster Anlauf: ohne Modell.** Der Aufrufer sucht damit und
         # fragt erst wieder nach, wenn nichts dabei herauskam. Gerade bei
