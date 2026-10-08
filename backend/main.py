@@ -14,6 +14,7 @@ import threading
 import time
 import urllib.parse
 import uuid
+from typing import Literal
 
 import requests
 from fastapi import (Depends, FastAPI, File, HTTPException, Request,
@@ -3243,6 +3244,20 @@ def set_jedipedia(body: JedipediaBody, user: dict = Depends(current_user)):
     return {"ok": True, "an": body.an}
 
 
+class BauanleitungBody(BaseModel):
+    wo: Literal["aus", "browser", "handy", "beide"]
+
+
+@app.post("/api/settings/bauanleitung")
+def set_bauanleitung(body: BauanleitungBody, user: dict = Depends(current_user)):
+    """Verweis auf LEGOs Bauanleitungen bei Sets – je Benutzer, und wo:
+    nur in der Browseransicht, nur in der Handyansicht oder in beiden
+    (08.10.2026 gewünscht). Ausgeschaltet voreingestellt, wie jeder Verweis
+    nach draußen."""
+    core.set_user_setting(user["id"], "bauanleitung", body.wo)
+    return {"ok": True, "wo": body.wo}
+
+
 class AngebotspreiseBody(BaseModel):
     an: bool
 
@@ -3304,6 +3319,10 @@ def config(user: dict = Depends(current_user)):
                                               "jedipedia") == "1",
             "angebotspreise": core.get_user_setting(
                 user["id"], "angebotspreise") == "1",
+            # aus | browser | handy | beide – „handy" gilt für die schmale
+            # Ansicht und für andere Oberflächen auf dem Telefon.
+            "bauanleitung": core.get_user_setting(
+                user["id"], "bauanleitung") or "aus",
             "offer_percent": _offer_percent(),
             "owner_name": _owner_name(),
             "betreiber_kontakt": core.get_setting("betreiber_kontakt") or "",

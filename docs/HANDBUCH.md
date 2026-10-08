@@ -1428,6 +1428,12 @@ Im Popup zeigt sich:
 - **Bild antippen** öffnet die Großansicht. Der Hinweis „Wischen zum
   Blättern" erscheint nur, wenn es wirklich mehr als ein Bild gibt – in
   aller Regel also erst, wenn du ein eigenes Foto dazugehängt hast.
+- **Bauanleitung ↗** (nur bei Sets, und nur wenn eingeschaltet unter
+  *Mehr → 📘 Bauanleitungen*) öffnet LEGOs Seite mit den Bauanleitungen zu
+  dieser Setnummer. Bei Figuren steht in der Liste „in Sets“ dazu ein 📘.
+  Du wählst, wo der Verweis erscheint: nur in der Browseransicht, nur in
+  der Handyansicht (schmale Darstellung) oder in beiden. Für Sets ab etwa
+  1999 hat LEGO die Anleitung fast immer, für ganz alte oft nicht.
 - **ⓘ neben dem Namen** (nur Star Wars, und nur wenn eingeschaltet unter
   *Mehr → 📖 Jedipedia-Verweis*) schlägt die Figur im deutschen
   Star-Wars-Wiki nach – in aller Regel **direkt im Artikel**. Dafür wird

@@ -1,5 +1,16 @@
 # Changelog
 
+## 3.8.0 – Oktober 2026
+
+### Neu
+- 📘 **Verweis auf die Bauanleitungen bei LEGO.** Bei Sets – in der
+  Sammlung und im Katalog – und bei Figuren in der Liste „in Sets“ führt
+  ein Verweis zu LEGOs Seite mit den Bauanleitungen zur Setnummer.
+  **Optional und ausgeschaltet voreingestellt:** Unter *Mehr → 📘
+  Bauanleitungen* wählst du, ob er nur in der Browseransicht, nur in der
+  Handyansicht oder in beiden erscheint. Artikelseiten verlinken wir
+  nicht – die gibt es bei LEGO nur für Sets, die gerade verkauft werden.
+
 ## 3.7.4 – Oktober 2026
 
 ### Behoben
