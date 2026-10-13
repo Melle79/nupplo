@@ -61,6 +61,12 @@ KOPF, KOERPER, ENDE, ABBRUCH = 1, 2, 3, 4
 STUECK = 60 * 1024
 CODE_FRIST = 10 * 60
 LEBENSZEICHEN = 30
+# So lange darf ein Gerät nach dem Öffnen eines Kanals schweigen, bevor der
+# Kanal wieder zugeht (3.8.3). Der Vermittler nimmt je Instanz nur 8 Geräte
+# an und prüft selbst nichts – ohne Frist hielten 8 stumme Verbindungen alle
+# Plätze dauerhaft besetzt. Ein echter Handschlag ist eine Nachricht hin und
+# eine zurück, das dauert Millisekunden.
+HANDSCHLAG_FRIST = 10
 # Kopfzeilen, die nur für eine Verbindung gelten.
 VERBINDUNGSKOPF = {"host", "connection", "keep-alive", "transfer-encoding",
                    "content-length", "upgrade", "proxy-connection", "te"}
@@ -218,6 +224,7 @@ class Kanal:
         self.stroeme: dict[int, dict] = {}
         self.aufgaben: set = set()
         self.zu = asyncio.Event()
+        self.handschlag_laeuft = False
         # Verschlüsseln und Abschicken in einem Zug und der Reihe nach –
         # die Nummern im Noise-Nonce müssen in Sendereihenfolge ankommen.
         self.schloss = asyncio.Lock()
@@ -269,7 +276,29 @@ class Kanal:
         elif typ == ABBRUCH:
             self.stroeme.pop(nummer, None)
 
+    def frist_starten(self):
+        """Zu, wenn der Handschlag nicht binnen HANDSCHLAG_FRIST kommt."""
+        t = asyncio.create_task(self._frist())
+        self.aufgaben.add(t)
+        t.add_done_callback(self.aufgaben.discard)
+
+    async def _frist(self):
+        await asyncio.sleep(HANDSCHLAG_FRIST)
+        if self.senden_c is None and not self.handschlag_laeuft and not self.zu.is_set():
+            # Sich selbst nicht mit abbrechen lassen: `schliessen` bricht alle
+            # Aufgaben des Kanals ab, und SCHLIESSEN muss noch hinaus.
+            self.aufgaben.discard(asyncio.current_task())
+            log("Kanal ohne Handschlag geschlossen")
+            await self.schliessen(melden=True)
+
     async def _handschlag(self, daten: bytes):
+        self.handschlag_laeuft = True
+        try:
+            await self._handschlag_fuehren(daten)
+        finally:
+            self.handschlag_laeuft = False
+
+    async def _handschlag_fuehren(self, daten: bytes):
         try:
             nutzlast = json.loads(self.hs.erste_lesen(daten) or b"{}")
             if not isinstance(nutzlast, dict):
@@ -429,6 +458,7 @@ class Verbinder:
                 except ValueError:
                     ip = ""
                 self.kanaele[nummer] = Kanal(self, nummer, ip)
+                self.kanaele[nummer].frist_starten()
             elif art == SCHLIESSEN:
                 k = self.kanaele.get(nummer)
                 if k:

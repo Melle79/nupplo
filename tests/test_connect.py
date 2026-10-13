@@ -494,3 +494,37 @@ def test_herkunft_kommt_nie_aus_kopfzeilen_des_geraets(instanz):
     assert len(gesehen) == 2
     assert gesehen[0][0] == gesehen[1][0] and gesehen[0][0].startswith("connect-")
     assert gesehen[0][1] is None, "die Kopfzeile des Geräts kommt nicht an"
+
+
+def test_stummer_kanal_geht_nach_der_frist_zu(instanz, monkeypatch):
+    """Sicherheitsprüfung 13.10.2026: Der Vermittler nimmt je Instanz nur 8
+    Geräte an und prüft selbst nichts. Ein Kanal ohne Handschlag blieb offen,
+    solange das Gerät schwieg – 8 stumme Verbindungen hielten alle Plätze
+    dauerhaft besetzt. Jetzt geht er nach HANDSCHLAG_FRIST zu, und der
+    Vermittler bekommt SCHLIESSEN. Ein gekoppeltes Gerät bleibt."""
+    monkeypatch.setattr(connect, "HANDSCHLAG_FRIST", 0.05)
+    instanz.ws = leitung = Leitung()
+    oeffnen = [connect._rahmen(connect.OEFFNEN, n, json.dumps({"ip": "203.0.113.9"}).encode())
+               for n in (11, 12)]
+
+    class Ws:
+        def __aiter__(self):
+            async def gen():
+                for r in oeffnen:
+                    yield r
+            return gen()
+
+    async def ablauf():
+        await instanz._lesen(Ws())
+        assert {11, 12} <= set(instanz.kanaele)
+        # Kanal 12 bekommt rechtzeitig einen echten Handschlag.
+        g = Geraet.__new__(Geraet)
+        g.v, g.kanal, g.leitung = instanz, 12, leitung
+        g.s = X25519PrivateKey.generate()
+        g.hs = noise.Handschlag(True, connect.PROLOG, g.s, connect._oeffentlich(instanz.x25519))
+        await g.koppeln({"code": "falsch"})       # Antwort kommt, dann zu oder offen
+        leitung.raus.clear()
+        await asyncio.sleep(0.15)
+        assert 11 not in instanz.kanaele
+        assert connect._rahmen(connect.SCHLIESSEN, 11) in leitung.raus
+    lauf(ablauf())
