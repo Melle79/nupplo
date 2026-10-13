@@ -66,7 +66,9 @@ def test_der_abzug_kommt_als_datei_an(client, monkeypatch):
     assert erg["neu"] == 1
     with core.db() as conn:
         r = conn.execute("SELECT * FROM katalog_index").fetchone()
-    assert r["merkmale"] == "cape yellow green dragon"
+    # Seit 3.8.2 wird gleich nach dem Abruf eingedeutscht, nicht nur
+    # einmal beim Start – der englische Text bleibt vorn stehen.
+    assert r["merkmale"].startswith("cape yellow green dragon")
     assert r["art"] == "knight"
     # Der Name steht **nicht** in der Datei – den holt die Installation selbst.
     assert r["name"] == ""
@@ -125,7 +127,8 @@ def test_der_name_wird_beim_ziehen_nicht_ueberschrieben(client, monkeypatch):
         r = conn.execute("SELECT name, such, merkmale FROM katalog_index"
                          " WHERE item_no = 'cas001'").fetchone()
     assert r["name"] == "Dragon Master" and r["such"] == "dragonmaster"
-    assert r["merkmale"] == "torso red blue", "die Beschreibung kam nicht an"
+    assert r["merkmale"].startswith("torso red blue"), \
+        "die Beschreibung kam nicht an"
 
 
 def test_eine_zu_grosse_datei_wird_abgewiesen(client, monkeypatch):

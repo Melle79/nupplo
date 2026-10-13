@@ -1,0 +1,24 @@
+{
+ "schluessel": "OMehifzf6ELHp8Sgt7RoVsH2sl/q5w8GPj2lMhELKW0=",
+ "zusatz": "nupplo-katalog-1",
+ "aes_schluessel_hex": "1e37c5ec5231bd9ffce5cc97e2c5685c5a0e0155f8bbff0f6ab09f147cfb3898",
+ "nonce_schluessel_hex": "0a39e66927fb45bbf3c3f9de77885c6c630cdcae653dda0f5d19ac60acead98a",
+ "zeilen": [
+  {
+   "text": "{\"art\": \"man\", \"farben\": \"red, blue\", \"item_no\": \"sw0001\", \"merkmale\": \"head yellow smile; torso red jacket – mit Umlaut äöü\", \"modell\": \"geprüft\"}",
+   "falle": false,
+   "zeile": "Nd9OZLrWT2Uv5LS6JVVN3nbzv9YSDmfcOWMH15eVvnOPOT+a/uh1WvIK/YjJLuEFZWCjFaE/zBj/H1wx8Gw60fQnAA9BuWW1xe2szxhSlvvp2bhC15b18jOPZZoMCXsBFkyk84PR+nOAgmWu9mUMugG67wufH8S8ijzePoKBiKxcLgDM2NkrnJkJz8wg5id6YV7F+mHbfWw3Z5/clzjouQ4ZK45WTigzPy1eJexW7UML1sDGRQ=="
+  },
+  {
+   "text": "{\"hinweis\": \"Nur zur Nutzung in Nupplo.\"}",
+   "falle": false,
+   "zeile": "XkXqBdNNZYW3KqStR19VHFPReP6kAjbPZ13KkV3/QnupVp1sm6TYAgWr889ApihX9P6yU/4w6VOJd43D8hU8w5QzyR0e"
+  },
+  {
+   "text": "{\"farben\": \"white\", \"item_no\": \"cty1234j\", \"merkmale\": \"head yellow; torso white\"}",
+   "falle": true,
+   "zeile": "JpOABWUSUGuweLZS2TJxsOTJknmzVNZDcginmtc6wnHj60RI0YAIK2kyuVBjrwHt3YMsXHiXFO4bGLKmC7SDoMwaQYi6E+mytJDnta/BTbZy9yjVpCyQ6oPZol0ULDpCjR9iWsxkWio4ZXFxvog="
+  }
+ ],
+ "fremd": "17H+qGlUiE168EjuGGQUu/7cYtpkXhX2ktpkZZVFBGyHm62m8kc4bsVzCtw="
+}

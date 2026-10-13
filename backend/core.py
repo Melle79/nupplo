@@ -42,7 +42,7 @@ SECRET_KEY = _load_secret()
 
 # ---------------------------------------------------------------- Passwörter
 
-APP_VERSION = "3.8.1"
+APP_VERSION = "3.8.2"
 
 
 def hash_password(password: str) -> str:
@@ -166,40 +166,58 @@ def _merkmale_eindeutschen(conn) -> int:
     diesem Wortschatz entstanden, also reicht es zum Rückübersetzen.
     Angehängt wird abschnittsweise, damit die Gliederung erhalten bleibt
     (`head … ; torso …` wird zu `… ; kopf … ; torso …`).
-
-    Ein Abschnitt kommt nur mit, wenn mindestens zwei Wörter ankommen und
-    eines davon eindeutig deutsch ist – sonst stünde dort bloß dasselbe
-    noch einmal.
     """
-    import woerterbuch
-    rueck: dict = {}
-    for de, engl in woerterbuch.WOERTERBUCH.items():
-        for e in engl:
-            if " " not in e:
-                rueck.setdefault(e, de)
     zeilen = conn.execute(
         "SELECT item_no, merkmale FROM katalog_index"
         " WHERE item_type = 'minifig' AND merkmale <> ''").fetchall()
     getan = 0
     for r in zeilen:
-        text = r["merkmale"]
-        worte_ganz = re.split(r"[^a-z0-9]+", falten(text))
-        if any(w in _DEUTSCH_ERKANNT for w in worte_ganz):
-            continue                     # trägt schon Deutsch
-        teile = []
-        for teil in text.split(";"):
-            neu = [rueck[w] for w in re.split(r"[^a-z0-9]+", falten(teil))
-                   if w in rueck]
-            if len(neu) >= 2 and any(w in _DEUTSCH_ERKANNT for w in neu):
-                teile.append(" ".join(dict.fromkeys(neu))[:90])
-        if not teile:
+        neu = merkmale_eindeutschen(r["merkmale"])
+        if neu == r["merkmale"]:
             continue
         conn.execute(
             "UPDATE katalog_index SET merkmale = ?"
             " WHERE item_no = ? AND item_type = 'minifig'",
-            (text.rstrip("; ") + "; " + "; ".join(teile), r["item_no"]))
+            (neu, r["item_no"]))
         getan += 1
     return getan
+
+
+_rueck: dict = {}
+
+
+def merkmale_eindeutschen(text: str) -> str:
+    """Eine Beschreibung mit ihrer deutschen Fassung dahinter.
+
+    Ein Abschnitt kommt nur mit, wenn mindestens zwei Wörter ankommen und
+    eines davon eindeutig deutsch ist – sonst stünde dort bloß dasselbe
+    noch einmal. Trägt der Text schon Deutsch, bleibt er, wie er ist.
+
+    **Auch beim Abruf, nicht nur einmal beim Start** (3.8.2). Bis dahin
+    lief das nur als Wanderung über den Bestand; was danach mit dem Abzug
+    kam, blieb englisch, und der nächste Abzug überschrieb sogar die
+    eingedeutschten Zeilen wieder mit dem englischen Text – sie sahen ja
+    anders aus als die Datei. Jetzt wird die Datei genauso eingedeutscht,
+    bevor verglichen wird: Unverändert bleibt unverändert.
+    """
+    if not _rueck:
+        import woerterbuch
+        for de, engl in woerterbuch.WOERTERBUCH.items():
+            for e in engl:
+                if " " not in e:
+                    _rueck.setdefault(e, de)
+    worte_ganz = re.split(r"[^a-z0-9]+", falten(text))
+    if not text or any(w in _DEUTSCH_ERKANNT for w in worte_ganz):
+        return text
+    teile = []
+    for teil in text.split(";"):
+        neu = [_rueck[w] for w in re.split(r"[^a-z0-9]+", falten(teil))
+               if w in _rueck]
+        if len(neu) >= 2 and any(w in _DEUTSCH_ERKANNT for w in neu):
+            teile.append(" ".join(dict.fromkeys(neu))[:90])
+    if not teile:
+        return text
+    return text.rstrip("; ") + "; " + "; ".join(teile)
 
 
 def suchwoerter(name: str) -> str:
