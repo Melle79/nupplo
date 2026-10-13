@@ -1,5 +1,34 @@
 # Changelog
 
+## 3.8.2 – Oktober 2026
+
+### Geändert
+- 🔒 **Der Figurenkatalog kommt verschlüsselt.** Die Beschreibungen, mit
+  denen die Suche Figuren nach ihrem Aussehen findet, standen bisher als
+  Klartext in `katalog/index.ndjson` – und damit unter der MIT-Lizenz des
+  Repos, also für jeden frei nehmbar. Sie sind aber eigene Arbeit des
+  Projekts und sollen nur in Nupplo genutzt werden. Jetzt lädt Nupplo
+  `katalog/index.nupplo`, Zeile für Zeile verschlüsselt, und der Ordner
+  `katalog/` hat eine eigene Lizenz (`katalog/LIZENZ.md`): Nutzung nur in
+  Nupplo. Der Schlüssel steht in Nupplo selbst – jede Installation bekommt
+  den Katalog weiter ohne Anmeldung und ohne Hub. Die Verschlüsselung ist
+  bewusst ein Schild, keine Festung: Wer sie umgeht, weiß, dass der Inhalt
+  nicht für ihn bestimmt ist. Ein paar Kontrollzeilen machen eine Kopie
+  erkennbar; Nupplo übergeht sie. Das Format steht in
+  `docs/KATALOG-FORMAT.md`.
+- 📣 **Ältere Fassungen bitten ums Update.** An der alten Stelle liegt nur
+  noch ein Hinweis. Wer nicht aktualisiert, findet bei der Suche nach
+  Aussehen statt Figuren die Bitte, Nupplo zu aktualisieren – mit dem
+  Grund dafür. Nach dem Update verschwinden diese Hinweise von selbst, und
+  jede Beschreibung kommt aus der neuen Datei zurück. Wer die alte Adresse
+  als Katalogquelle eingetragen hatte, wird still auf die neue umgelenkt.
+- 🇩🇪 **Beschreibungen werden beim Abruf eingedeutscht**, nicht nur einmal
+  beim Start. Sonst wären alle Beschreibungen, die nach dem Hinweis neu
+  kommen, englisch geblieben, und „gelber Kopf“ fände nichts mehr.
+
+Sonst ändert sich nichts – dieses Update bringt nur die neue Katalogdatei
+und ihren Schlüssel.
+
 ## 3.8.1 – Oktober 2026
 
 ### Geändert

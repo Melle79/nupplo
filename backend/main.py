@@ -29,6 +29,7 @@ import core
 import crypto_box
 import hub
 import integrations
+import katalogschutz
 import namensfarben
 import push
 import totp
@@ -1347,7 +1348,7 @@ def katalog_stand(user: dict = Depends(admin_user)):
             "hat_bricklink": integrations.bricklink_enabled(),
             "geholt_at": int(core.get_setting("katalog_geholt_at") or 0),
             "geprueft_at": int(core.get_setting("katalog_geprueft_at") or 0),
-            "quelle": core.get_setting("katalog_quelle") or KATALOG_QUELLE}
+            "quelle": _katalog_quelle()}
 
 
 
@@ -2465,8 +2466,16 @@ def _katalog_changelog() -> dict:
 # Wo der veröffentlichte Abzug liegt. Eine Datei, kein Dienst: Sie ist über
 # GitHub für jede Installation erreichbar, ohne dass jemand einen Zugang von
 # irgendwem braucht und ohne dass bei irgendwem etwas laufen muss.
+#
+# **Seit 3.8.2 verschlüsselt** (`katalogschutz.py`). An der alten Adresse
+# steht nur noch ein Hinweis für ältere Fassungen, der ihre Suche um ein
+# Update bitten lässt. Wer die alte Adresse von Hand eingetragen hatte – sie
+# war bis dahin die Vorgabe –, wird still auf die neue umgelenkt; sonst
+# bekäme er genau diesen Hinweis.
 KATALOG_QUELLE = ("https://raw.githubusercontent.com/Melle79/nupplo/"
-                  "main/katalog/index.ndjson")
+                  "main/katalog/index.nupplo")
+KATALOG_QUELLE_ALT = ("https://raw.githubusercontent.com/Melle79/nupplo/"
+                      "main/katalog/index.ndjson")
 
 # Wie viel die Datei höchstens haben darf. Bei 9.741 Figuren sind es 3,3 MB;
 # 32 MB sind ein Vielfaches davon und trotzdem eine Grenze – die Adresse
@@ -2544,6 +2553,11 @@ def katalog_namen_je_lauf() -> int:
 _namen_lauf = {"aktiv": False, "getan": 0, "stop": False, "fehler": ""}
 
 
+def _katalog_quelle() -> str:
+    quelle = core.get_setting("katalog_quelle") or KATALOG_QUELLE
+    return KATALOG_QUELLE if quelle == KATALOG_QUELLE_ALT else quelle
+
+
 def _katalog_ziehen() -> dict:
     """Den veröffentlichten Abzug holen – Nummer und Beschreibung.
 
@@ -2560,7 +2574,7 @@ def _katalog_ziehen() -> dict:
     """
     if core.get_setting("katalog_aus") == "1":
         return {"geholt": 0, "grund": "abgeschaltet"}
-    quelle = core.get_setting("katalog_quelle") or KATALOG_QUELLE
+    quelle = _katalog_quelle()
     kopf = {"User-Agent": integrations.USER_AGENT}
     etag = core.get_setting("katalog_etag")
     if etag:
@@ -2578,17 +2592,27 @@ def _katalog_ziehen() -> dict:
     neu = geaendert = 0
     jetzt = int(time.time())
     with core.db() as conn:
+        # Die Hinweise, die ältere Fassungen aus der alten Datei holen,
+        # stehen als „Figur“ mit dem Satz als Nummer im Index. Wer erst
+        # danach aktualisiert hat, soll sie nicht weiter in der Suche haben.
+        # Echte BrickLink-Nummern tragen nie ein Leerzeichen.
+        conn.execute("DELETE FROM katalog_index WHERE item_type = 'minifig'"
+                     " AND item_no LIKE '% %'")
         for zeile in r.text.splitlines():
-            zeile = zeile.strip()
-            if not zeile:
-                continue
+            text = katalogschutz.zeile_lesen(zeile)
+            if text is None:
+                continue          # Hinweis, Falle oder fremde Zeile
             try:
-                d = json.loads(zeile)
+                d = json.loads(text)
             except ValueError:
                 continue          # eine kaputte Zeile wirft nicht alles weg
             nr = str(d.get("item_no") or "").strip()
             if not nr:
                 continue
+            # Eingedeutscht **vor** dem Vergleich: Nach dem Hinweis der
+            # alten Datei kommt jede Beschreibung neu, und ohne das fände
+            # „gelber Kopf“ danach nichts mehr (siehe `core`).
+            merkmale = core.merkmale_eindeutschen(str(d.get("merkmale") or ""))
             # **Nur unsere Felder anfassen.** `name`, `such`, `jahr` und
             # `category_id` füllt die Instanz selbst; sie hier zu
             # überschreiben hieße, die Arbeit von `_katalog_namen` bei jedem
@@ -2606,10 +2630,10 @@ def _katalog_ziehen() -> dict:
                 " updated_at = excluded.updated_at",
                 (nr, integrations.minifig_bild(nr),
                  str(d.get("farben") or ""), str(d.get("art") or ""),
-                 str(d.get("merkmale") or ""), jetzt))
+                 merkmale, jetzt))
             if vorher is None:
                 neu += 1
-            elif vorher["merkmale"] != (d.get("merkmale") or ""):
+            elif vorher["merkmale"] != merkmale:
                 geaendert += 1
     if r.headers.get("ETag"):
         core.set_setting("katalog_etag", r.headers["ETag"])
