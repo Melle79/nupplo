@@ -472,7 +472,7 @@ Sammlung tragen:
 | was | Repo | wozu |
 |---|---|---|
 | Projektseite brickfolio.cc | `brickfolio-website` | statischer Cloudflare Worker, von Hand veröffentlicht |
-| Katalogdienst | `brickfolio-katalogdienst` | baut den Katalogindex und schreibt ihn hierher nach `katalog/index.ndjson` |
+| Katalogdienst | `brickfolio-katalogdienst` | baut den Katalogindex und schreibt ihn verschlüsselt hierher nach `katalog/index.nupplo` |
 | Hub-Konsole | `brickfolio-hub-admin` | Oberfläche zur Verwaltung des Tausch-Netzwerks |
 | Tausch-Hub | `brickfolio-hub` | Cloudflare Worker + D1, den die Instanzen zum Tauschen ansprechen |
 
@@ -558,4 +558,6 @@ und du die Entwicklung unterstützen magst, freue ich mich über einen Kaffee �
 
 ## Lizenz
 
-[MIT](LICENSE)
+[MIT](LICENSE) für den Programmcode. Der Figurenkatalog in `katalog/`
+ist ausgenommen: Er darf nur in Nupplo genutzt werden, siehe
+[katalog/LIZENZ.md](katalog/LIZENZ.md).

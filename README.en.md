@@ -406,7 +406,7 @@ describe credentials or carry screenshots of a real collection:
 | what | repo | for |
 |---|---|---|
 | project site brickfolio.cc | `brickfolio-website` | static Cloudflare Worker, published by hand |
-| catalogue service | `brickfolio-katalogdienst` | builds the catalogue index and writes it here to `katalog/index.ndjson` |
+| catalogue service | `brickfolio-katalogdienst` | builds the catalogue index and writes it here, encrypted, to `katalog/index.nupplo` |
 | hub console | `brickfolio-hub-admin` | interface for running the trade network |
 | trade hub | `brickfolio-hub` | Cloudflare Worker + D1 that instances talk to for trading |
 
@@ -459,4 +459,6 @@ to support development, I'd be happy about a coffee ☕
 
 ## License
 
-[MIT](LICENSE)
+[MIT](LICENSE) for the program code. The figure catalogue in `katalog/`
+is excluded: it may only be used within Nupplo, see
+[katalog/LIZENZ.md](katalog/LIZENZ.md).
