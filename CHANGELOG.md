@@ -1,5 +1,17 @@
 # Changelog
 
+## 3.8.3 – Oktober 2026
+
+### Sicherheit
+- 🔒 **Zugriff ohne Portfreigabe: stumme Verbindungen gehen wieder zu.**
+  Ein Gerät, das sich über den Vermittler meldet, aber den verschlüsselten
+  Handschlag nicht schickt, hielt bisher seinen Platz, solange es wollte.
+  Weil der Vermittler je Instanz nur acht Geräte gleichzeitig zulässt,
+  konnte so jemand alle Plätze besetzen, und die eigenen Geräte kamen nicht
+  mehr hinein. Jetzt schließt Nupplo jede Verbindung, die nach zehn Sekunden
+  noch keinen Handschlag hat. Gekoppelte Geräte merken davon nichts, ihr
+  Handschlag dauert Millisekunden.
+
 ## 3.8.2 – Oktober 2026
 
 ### Geändert
