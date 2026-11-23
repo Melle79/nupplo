@@ -225,6 +225,82 @@ button { font-family: inherit; color: var(--ink); }
 .topbar .turm i:nth-child(2) { box-shadow: inset 0 -.05em 0 #A50D0F, 0 0 0 1px var(--noppen-kante); }
 .topbar .turm i:nth-child(3) { box-shadow: inset 0 -.05em 0 #003F7A, 0 0 0 1px var(--noppen-kante); }
 .topbar .turm i:nth-child(4) { box-shadow: inset 0 -.05em 0 #00702E, 0 0 0 1px var(--noppen-kante); }
+/* **Weihnachten: Der Turm wird zum Baum** (Klasse `weihnachten` an
+   `<html>`, gesetzt von `theme-boot.js` vom ersten Advent bis 06.01.).
+   Grün, Blau und Rot werden nach oben schmaler, der gelbe Stein wird zum
+   Stern – so bleiben alle vier Farben, und es liest sich als Baum statt
+   als Stapel. Vorlage: `docs/logo/weihnachten/`.
+
+   Der Stern ist ein Hintergrundbild und keine `clip-path`-Form: Ein
+   Ausschnitt schnitte auch die dunkle Kante weg, und ohne die verschwände
+   der gelbe Stern auf der gelben Kopfleiste. Die Maße bleiben die der
+   Steine, damit die Fall-Animation des Startbilds unverändert passt. */
+.weihnachten #splash .turm i { margin-left: auto; margin-right: auto; }
+.weihnachten #splash .turm i:nth-child(2) { width: 40%; }
+.weihnachten #splash .turm i:nth-child(3) { width: 70%; }
+.weihnachten #splash .turm i:first-child {
+  /* Etwas höher als ein Stein, sonst wirkt der Stern verloren; er ragt
+     dafür ein wenig über den Turm hinaus, wie eine Spitze eben. */
+  width: 60%; height: .21em; margin-top: -.047em;
+  border-radius: 0; box-shadow: none;
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='-12 -12 24 23'%3E%3Cpolygon points='0,-11 2.59,-3.56 10.46,-3.4 4.19,1.36 6.47,8.9 0,4.4 -6.47,8.9 -4.19,1.36 -10.46,-3.4 -2.59,-3.56' fill='%23FFCF00' stroke='%231D1D1B' stroke-opacity='.55' stroke-width='1.3' stroke-linejoin='round'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+
+/* **Außerhalb des Startbilds ist der Baum ein Bild** (`icons/turm-baum.svg`),
+   nicht aus Steinen gebaut: In der Kopfleiste sind die Steine nur wenige
+   Pixel hoch, und aus CSS-Kästen wurden unscharfe Streifen mit einem
+   verlorenen Stern (22.11.2026, an der Webseite: „das ist nicht
+   sauber“). Das SVG wird als Ganzes geglättet. Im Startbild bleiben es
+   Steine – dort sind sie groß genug, und nur so können sie einfallen.
+   ::before statt Hintergrund, weil der Stern über den Turm hinausragt. */
+.weihnachten .turm { position: relative; }
+.weihnachten .turm i { visibility: hidden; }
+.weihnachten .turm::before {
+  content: ""; position: absolute; left: 0; right: 0; bottom: 0;
+  height: calc(.48em * 730 / 476);
+  background: url("/static/icons/turm-baum.svg") bottom / 100% 100% no-repeat;
+}
+.weihnachten #splash .turm i { visibility: visible; }
+.weihnachten #splash .turm::before { content: none; }
+
+/* **Der Stern strahlt** (gewünscht am 22.11.2026).
+   Immer ein leichter Schein; im Startbild blitzt er beim Aufsetzen einmal
+   auf – er fällt als letzter Stein, 0,76 s + 0,55 s – und pulsiert dann
+   sacht, bis der Schirm weggeht. `drop-shadow` statt `box-shadow`, weil
+   nur er der Sternform folgt und nicht dem Kasten drumherum. */
+.weihnachten #splash .turm i:first-child {
+  filter: drop-shadow(0 0 .05em rgba(255, 207, 0, .75));
+}
+.weihnachten #splash .turm i:first-child {
+  animation: splash-fall .55s cubic-bezier(.34, 1.45, .55, 1) .76s backwards,
+             stern-funkeln .9s ease-out 1.31s,
+             stern-leuchten 1.1s ease-in-out 2.21s infinite alternate;
+}
+@keyframes stern-funkeln {
+  0%   { transform: none; filter: drop-shadow(0 0 .05em rgba(255, 207, 0, .75)); }
+  30%  { transform: scale(1.45) rotate(18deg);
+         filter: drop-shadow(0 0 .08em #FFF3B0) drop-shadow(0 0 .3em rgba(255, 207, 0, .95)); }
+  100% { transform: none; filter: drop-shadow(0 0 .05em rgba(255, 207, 0, .75)); }
+}
+@keyframes stern-leuchten {
+  from { filter: drop-shadow(0 0 .05em rgba(255, 207, 0, .75)); }
+  to   { filter: drop-shadow(0 0 .16em rgba(255, 207, 0, 1)); }
+}
+/* Die allgemeine Regel für ruhige Bewegung unten greift hier nicht – sie
+   ist schwächer als die Zeile oben. */
+@media (prefers-reduced-motion: reduce) {
+  .weihnachten #splash .turm i:first-child { animation: none; }
+}
+
+/* Die Noppenreihe über Anmeldung und Assistent wird zur selben Zeit ein
+   kleiner Baum – vier Noppen nebeneinander und ein Baum in der Wortmarke
+   sähen nach zwei verschiedenen Marken aus. */
+.weihnachten .logo-studs {
+  height: 34px;
+  background: url("/static/icons/weihnachtsbaum.svg") center / contain no-repeat;
+}
+.weihnachten .logo-studs i { display: none; }
+
 /* Der Gruß nimmt den Platz zwischen Wortmarke und Knöpfen und kürzt sich
    am Handy mit „…“, statt die Knöpfe zu verdrängen. */
 .topbar-gruss {

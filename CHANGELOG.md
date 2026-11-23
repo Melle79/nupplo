@@ -1,5 +1,22 @@
 # Changelog
 
+## 3.8.4 – November 2026
+
+### Neu
+- 🎄 **Vom ersten Advent bis 06.01. wird der Turm im Logo zum
+  Weihnachtsbaum.** Grüner, blauer und roter Stein werden nach oben
+  schmaler, und der gelbe wird zum Stern. Im Startbildschirm landet er
+  zuletzt, blitzt auf und leuchtet. In der Kopfleiste und bei der Anmeldung
+  steht der Baum ebenfalls. Danach ist von selbst wieder der Turm da.
+  - Der erste Advent liegt jedes Jahr woanders (27.11. bis 03.12.).
+    `theme-boot.js` rechnet ihn aus und setzt die Klasse vor dem ersten
+    Bild, damit der Startbildschirm nicht erst den Turm zeigt.
+  - Außerhalb des Startbilds ist der Baum ein Bild
+    (`icons/turm-baum.svg`). Aus einzelnen CSS-Steinen wurden in der
+    kleinen Kopfleiste unscharfe Streifen.
+  - Zum Ansehen außerhalb der Zeit: `?weihnachten=an`, zurück mit
+    `?weihnachten=auto`.
+
 ## 3.8.3 – Oktober 2026
 
 ### Sicherheit
