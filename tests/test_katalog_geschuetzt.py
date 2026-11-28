@@ -1,4 +1,4 @@
-"""Der Figurenkatalog kommt verschlüsselt (3.8.2).
+"""Der Figurenkatalog kommt verschlüsselt (3.9.15).
 
 Anlass: Am 13.10.2026 fiel auf, dass die Figurbeschreibungen im Klartext im
 öffentlichen Repo stehen – unter MIT, also für jeden frei nehmbar. Sie
@@ -144,3 +144,25 @@ def test_eigene_quelle_im_klartext_geht_weiter(instanz, monkeypatch):
     assert main._katalog_ziehen()["neu"] == 1
     assert geholt == ["http://192.0.2.1:8320/index.ndjson"]
 
+
+def test_eingedeutschte_zeilen_gelten_beim_naechsten_abruf_als_unveraendert(
+        instanz, monkeypatch):
+    """Eingedeutscht wurde bis 3.9.14 nur einmal beim Start. Der nächste
+    Abzug sah die deutsche Fassung dann als „anders als die Datei“, schrieb
+    den englischen Text zurück und gab jeder Zeile eine neue Zeit – und
+    nach Zeit liefert der Abgleich mit dem externen Zugriff. Seit der
+    Hinweis der alten Datei jede Beschreibung neu bringt, muss die Datei
+    genauso eingedeutscht werden, bevor verglichen wird."""
+    figur = {"item_no": "cas001", "farben": "yellow, red",
+             "merkmale": "head yellow smile; torso red armor"}
+    _datei(monkeypatch, _zeile(json.dumps(figur)) + "\n")
+    main._katalog_ziehen()
+    with core.db() as conn:
+        conn.execute("UPDATE katalog_index SET updated_at = 1")
+    _datei(monkeypatch, _zeile(json.dumps(figur)) + "\n", etag='"zwei"')
+    assert main._katalog_ziehen()["geaendert"] == 0
+    with core.db() as conn:
+        r = conn.execute("SELECT merkmale, updated_at FROM katalog_index"
+                         ).fetchone()
+    assert r["updated_at"] == 1
+    assert "kopf" in r["merkmale"]

@@ -1,5 +1,7 @@
 /* Nupplo Service Worker – App-Shell offlinefähig, API immer live */
-const CACHE = "nupplo-v12";
+// v13 (3.8.2): Mit dem neuen Namen räumt `activate` den alten Speicher ab,
+// in dem sich seit v12 jedes Bild und jede App-Fassung gesammelt hatte.
+const CACHE = "nupplo-v13";
 const SHELL = [
   "/",
   "/static/style.css",
@@ -13,8 +15,6 @@ const SHELL = [
   "/static/icons/icon-512.png",
   // Schrift liegt lokal – ohne Internet sieht die Oberfläche trotzdem richtig
   // aus. Daten kommen immer live vom eigenen Server (/api/ wird nie gecacht).
-  "/static/fonts/nunito-latin-600.woff2",
-  "/static/fonts/nunito-latin-800.woff2",
   "/static/fonts/nunito-latin-900.woff2",
 ];
 
@@ -41,13 +41,22 @@ self.addEventListener("fetch", (e) => {
   // einen harten Netzwerkfehler: Das Bild blieb dann leer, statt beim
   // nächsten Blättern einfach nachzuladen.
   if (url.origin !== location.origin) return;
+  // **Nur die App selbst wird aufgehoben, keine Bilder.** Bis 3.8.1 landete
+  // jede Antwort hier – jedes Vorschaubild von `/catalog`, jedes Foto aus
+  // `/uploads` –, und zwar bei jeder Anzeige neu geschrieben und nie wieder
+  // gelöscht. Die Bilder hält der Browser ohnehin ein Jahr vor (`max-age`),
+  // offline braucht man sie nicht doppelt.
+  const shell = url.pathname === "/" || url.pathname.startsWith("/static/")
+    || url.pathname === "/manifest.webmanifest";
+  if (!shell) return;
   // Netz zuerst (damit Updates sofort ankommen), Cache als Offline-Fallback
   e.respondWith(
     fetch(e.request)
       .then((resp) => {
         if (resp.ok) {
           const copy = resp.clone();
-          caches.open(CACHE).then((c) => c.put(e.request, copy));
+          caches.open(CACHE).then((c) => c.put(e.request, copy)
+            .then(() => altfassungenWeg(c, url)));
         }
         return resp;
       })
@@ -55,10 +64,26 @@ self.addEventListener("fetch", (e) => {
       // `respondWith(undefined)` wirft „Failed to convert value to
       // 'Response'". Der Browser sah dann einen kaputten Worker statt einer
       // ehrlichen Fehlermeldung. Also immer eine echte Antwort zurückgeben.
-      .catch(() => caches.match(e.request).then((hit) => hit || new Response(
+      // `ignoreSearch`: Die Seite fragt `app.js?v=3.8.2` an, vorgeladen ist
+      // `app.js` ohne Marke – ohne Ignorieren träfe das nie.
+      .catch(() => caches.match(e.request, { ignoreSearch: true })
+        .then((hit) => hit || new Response(
         "Offline", { status: 504, statusText: "Gateway Timeout" })))
   );
 });
+
+/* Ältere Fassungen derselben Datei aus dem Speicher nehmen. Jede Version
+   lädt `app.js?v=…` unter neuer Adresse; ohne das lag nach zehn Updates die
+   App zehnmal im Speicher des Telefons (je 582 KB allein für app.js). */
+function altfassungenWeg(c, url) {
+  if (!url.search) return;
+  return c.keys().then((keys) => Promise.all(keys
+    .filter((r) => {
+      const k = new URL(r.url);
+      return k.pathname === url.pathname && k.search && k.search !== url.search;
+    })
+    .map((r) => c.delete(r))));
+}
 
 /* Meldung vom eigenen Server. Der Inhalt ist bewusst knapp – Einzelheiten
    stehen in der App, nicht auf dem Sperrbildschirm. */

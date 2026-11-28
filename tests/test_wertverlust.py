@@ -32,14 +32,19 @@ def ctx(tmp_path, monkeypatch):
 
 
 def artikel(name, bezahlt, wert):
-    """Ein Stück mit Kaufpreis und aktuellem Gebrauchtwert."""
+    """Ein Stück mit Kaufpreis und aktuellem Gebrauchtwert.
+
+    Mit Preisstand jetzt: Ohne ihn gilt der Preis seit 3.9.17 als alt und
+    verfällt, sobald der Verfall vor einer Anfrage läuft (höchstens einmal
+    je Minute) – je nach Reihenfolge der Tests war der Gewinner dann weg."""
     with core.db() as conn:
         conn.execute(
             "INSERT INTO collection (item_id, item_type, name, quantity,"
-            " condition, price_used, paid_price, paid_source, added_at)"
-            " VALUES (?, 'minifig', ?, 1, 'used', ?, ?, 'manual', ?)",
+            " condition, price_used, paid_price, paid_source, added_at,"
+            " price_updated_at) VALUES (?, 'minifig', ?, 1, 'used', ?, ?,"
+            " 'manual', ?, ?)",
             (name.lower().replace(" ", ""), name, wert, bezahlt,
-             int(time.time())))
+             int(time.time()), int(time.time())))
 
 
 def zahlen(ctx) -> dict:

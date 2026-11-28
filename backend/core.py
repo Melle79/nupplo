@@ -42,7 +42,7 @@ SECRET_KEY = _load_secret()
 
 # ---------------------------------------------------------------- Passwörter
 
-APP_VERSION = "3.8.4"
+APP_VERSION = "3.10.0"
 
 
 def hash_password(password: str) -> str:
@@ -117,9 +117,17 @@ def decode_token(token: str) -> dict | None:
 @contextmanager
 def db():
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
-    conn = sqlite3.connect(DB_PATH)
+    # 10 s statt 5 s Wartezeit: Der Katalog-Abzug schreibt 19.000 Zeilen in
+    # einem Zug, und auf einem NAS mit Festplatte dauert das. Wer in der Zeit
+    # schreiben will, soll warten statt „database is locked“ zu melden.
+    conn = sqlite3.connect(DB_PATH, timeout=10)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
+    # Mit WAL (siehe `wal_einschalten`) reicht NORMAL: Ein Absturz kann die
+    # letzten Sekunden kosten, aber nie die Datei beschädigen. FULL kostete
+    # bei jedem kleinen Commit – Namenslauf, Preise, Einstellungen – mehrere
+    # fsyncs; auf einer NAS-Festplatte 10–30 ms je Commit.
+    conn.execute("PRAGMA synchronous = NORMAL")
     try:
         yield conn
         conn.commit()
@@ -193,7 +201,7 @@ def merkmale_eindeutschen(text: str) -> str:
     eines davon eindeutig deutsch ist – sonst stünde dort bloß dasselbe
     noch einmal. Trägt der Text schon Deutsch, bleibt er, wie er ist.
 
-    **Auch beim Abruf, nicht nur einmal beim Start** (3.8.2). Bis dahin
+    **Auch beim Abruf, nicht nur einmal beim Start** (3.9.15). Bis dahin
     lief das nur als Wanderung über den Bestand; was danach mit dem Abzug
     kam, blieb englisch, und der nächste Abzug überschrieb sogar die
     eingedeutschten Zeilen wieder mit dem englischen Text – sie sahen ja
@@ -277,7 +285,52 @@ def set_user_setting(user_id: int, schluessel: str, wert: str) -> None:
             (user_id, schluessel, wert))
 
 
+def wal_einschalten() -> None:
+    """Datenbank in den WAL-Modus – einmal gesetzt, bleibt er in der Datei.
+
+    Bis 3.8.1 lief SQLite mit Rücksprungjournal: Solange ein Hintergrundlauf
+    (Katalog-Abzug, Namen, Preise) schrieb, standen lesende Anfragen an, und
+    bei großen Schreibvorgängen kam „database is locked“. Mit WAL lesen
+    Anfragen weiter, während geschrieben wird.
+
+    Fehler werden geschluckt: Auf einem Netzlaufwerk (SMB/NFS) geht WAL
+    nicht, dort läuft die Instanz weiter wie bisher.
+    """
+    try:
+        with db() as conn:
+            conn.execute("PRAGMA journal_mode = WAL")
+    except sqlite3.Error:
+        pass
+
+
+def wal_zusammenfuehren() -> None:
+    """WAL-Datei in die Datenbank zurückschreiben und leeren.
+
+    Vor einem Update: `update.sh` kopiert die Datei von außen, während der
+    Container läuft. Was nur in `brickfolio.db-wal` steht, fehlte in einer
+    Kopie, die nur `brickfolio.db` mitnimmt – wie die update.sh bis 3.8.1.
+    """
+    try:
+        with db() as conn:
+            conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+    except sqlite3.Error:
+        pass
+
+
+def als_einzeldatei(conn) -> None:
+    """Eine Sicherung zurück auf das klassische Journal stellen.
+
+    `backup()` übernimmt den WAL-Modus der Quelle in die Kopie. Jedes Öffnen
+    der Sicherung – die Prüfung vor dem Einspielen, ein Blick mit einem
+    SQLite-Programm – legte dann `-wal` und `-shm` daneben, und die blieben
+    liegen, wenn die Sicherung später aufgeräumt wird. Eine Sicherung soll
+    eine Datei sein, die man herunterladen und kopieren kann.
+    """
+    conn.execute("PRAGMA journal_mode = DELETE")
+
+
 def init_db():
+    wal_einschalten()
     with db() as conn:
         conn.executescript(
             """
@@ -538,6 +591,62 @@ def init_db():
             );
             CREATE INDEX IF NOT EXISTS idx_katalog_such
                 ON katalog_index(such);
+            -- Setnamen in anderen Sprachen, wie LEGO sie auf Schachtel und
+            -- Bauanleitungsseite druckt („Supersternzerstörer Executor"
+            -- statt „Executor Super Star Destroyer - UCS"). Kommen als
+            -- eigene Datei neben dem Abzug; ein vollständiger Stand, der
+            -- bei jedem Abruf die Tabelle ersetzt.
+            CREATE TABLE IF NOT EXISTS set_namen (
+                nr TEXT NOT NULL,
+                sprache TEXT NOT NULL,
+                name TEXT NOT NULL,
+                -- wie `katalog_index.woerter`: für die Vorauswahl
+                woerter TEXT NOT NULL DEFAULT '',
+                PRIMARY KEY (nr, sprache)
+            );
+            -- Was im Set-Steckbrief steht: Teile, Thema, Jahr, Figuren.
+            -- Aus Rebrickables freien Downloads, gebaut vom Katalogdienst
+            -- (`setdaten.ndjson`) – ohne BrickLink, ohne Schlüssel. Wie die
+            -- Setnamen ein vollständiger Stand, der die Tabelle ersetzt.
+            -- `figuren` ist JSON `[["fig-000997", 1], …]` mit
+            -- Rebrickable-Nummern; deren Namen stehen in `set_daten_fig`.
+            CREATE TABLE IF NOT EXISTS set_daten (
+                nr TEXT PRIMARY KEY,
+                name TEXT NOT NULL DEFAULT '',
+                jahr INTEGER NOT NULL DEFAULT 0,
+                teile INTEGER NOT NULL DEFAULT 0,
+                thema TEXT NOT NULL DEFAULT '',
+                unterthema TEXT NOT NULL DEFAULT '',
+                figuren TEXT NOT NULL DEFAULT '[]'
+            );
+            -- Figuren, die ein eigenes Set nachträglich bekommen hat (der
+            -- Nachtlauf hat den Inhalt ergänzt). Die App fragt beim
+            -- nächsten Öffnen, ob sie in die Sammlung sollen, und löscht
+            -- die Zeilen danach – wie beim Erfassen eines Sets.
+            CREATE TABLE IF NOT EXISTS set_neue_figuren (
+                set_no TEXT NOT NULL,
+                fig_no TEXT NOT NULL,
+                qty INTEGER NOT NULL DEFAULT 1,
+                name TEXT,
+                img_url TEXT,
+                seit INTEGER NOT NULL,
+                PRIMARY KEY (set_no, fig_no)
+            );
+            -- Brickmerge-Setseite, je Set und Tag einmal geholt (beim
+            -- Öffnen des Steckbriefs, siehe brickmerge.py).
+            CREATE TABLE IF NOT EXISTS brickmerge_seiten (
+                nr TEXT PRIMARY KEY,
+                tag TEXT NOT NULL,
+                url TEXT,
+                daten TEXT NOT NULL DEFAULT '{}',
+                ok INTEGER NOT NULL DEFAULT 0,
+                geholt INTEGER NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS set_daten_fig (
+                fig TEXT PRIMARY KEY,
+                name TEXT NOT NULL DEFAULT '',
+                teile INTEGER NOT NULL DEFAULT 0
+            );
             -- Wie weit der Anbau gekommen ist, je Präfix. Ohne das begänne
             -- ein abgebrochener Lauf wieder bei eins – bei 1.400 Nummern im
             -- Sekundentakt wäre das eine halbe Stunde für nichts.
@@ -645,6 +754,23 @@ def init_db():
                 item_id TEXT PRIMARY KEY,
                 bl_no TEXT NOT NULL,
                 checked_at INTEGER NOT NULL
+            );
+            -- Die Code-Liste des Katalogdienstes, zuletzt erfolgreich
+            -- geholt (siehe cmf.py). Liegt hier, damit ein Neustart bei
+            -- ausgefallenem Dienst nicht „nie eine Liste gehabt“ heißt.
+            CREATE TABLE IF NOT EXISTS cmf_codes (
+                code TEXT PRIMARY KEY,
+                item_no TEXT NOT NULL
+            );
+            -- Selbst gelernte Schachtel-Codes der Sammelfiguren (siehe
+            -- cmf.py). Gelten vor der Code-Liste des Katalogdienstes und
+            -- laufen nicht im Abgleich mit.
+            CREATE TABLE IF NOT EXISTS cmf_gelernt (
+                code TEXT PRIMARY KEY,
+                item_no TEXT NOT NULL,
+                roh TEXT NOT NULL DEFAULT '',
+                gelernt_am INTEGER NOT NULL,
+                gemeldet INTEGER NOT NULL DEFAULT 0
             );
             CREATE TABLE IF NOT EXISTS push_subs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1108,6 +1234,29 @@ def init_db():
             conn.execute("ALTER TABLE set_contents ADD COLUMN name TEXT")
         if sccols and "img_url" not in sccols:
             conn.execute("ALTER TABLE set_contents ADD COLUMN img_url TEXT")
+        # Teil für Teil (3.9.0): welche Teile einer gewünschten Figur schon
+        # da sind. Der Abgleich liest die Spalten der Tabelle selbst – die
+        # neue geht ohne weiteres Zutun mit an die iOS-App.
+        wcols = {r[1] for r in conn.execute("PRAGMA table_info(wanted)")}
+        if wcols and "teile_da" not in wcols:
+            conn.execute("ALTER TABLE wanted ADD COLUMN teile_da "
+                         "TEXT NOT NULL DEFAULT ''")
+        # Erscheinung, EOL und UVP je Set (3.9.3, aus der Setdatei des
+        # Katalogdienstes). Nachträglich, weil die Tabelle auf der
+        # Testinstanz schon ohne die Spalten steht.
+        sdcols = {r[1] for r in conn.execute("PRAGMA table_info(set_daten)")}
+        for spalte, art in (("erschienen", "TEXT NOT NULL DEFAULT ''"),
+                            ("eol", "TEXT NOT NULL DEFAULT ''"),
+                            ("eol_geschaetzt", "INTEGER NOT NULL DEFAULT 0"),
+                            ("uvp_eur", "REAL"),
+                            # Setbilder von Brickmerge, seit 3.9.12 über den
+                            # Katalogdienst statt beim Öffnen geholt.
+                            ("bilder", "TEXT NOT NULL DEFAULT '[]'")):
+            if sdcols and spalte not in sdcols:
+                conn.execute("ALTER TABLE set_daten ADD COLUMN %s %s"
+                             % (spalte, art))
+        import figurteile
+        figurteile.migrieren(conn)
         # Abgleich für externen Zugriff: Spalten, Tabellen, Trigger (sync.py).
         # Am Ende, damit alle Tabellen und Spalten schon da sind.
         import sync

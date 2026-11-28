@@ -14,6 +14,10 @@ import integrations
 import main
 from fastapi.testclient import TestClient
 
+# Prüft den Weg über BrickLink, siehe `mit_eigenem_schluessel` in conftest.
+pytestmark = pytest.mark.usefixtures("mit_eigenem_schluessel")
+
+
 
 @pytest.fixture(autouse=True)
 def leerer_cache(monkeypatch):
@@ -136,7 +140,9 @@ def test_schalter_steht_voreingestellt_aus(ctx):
     assert ctx.get("/api/config").json()["angebotspreise"] is False
 
 
-def test_schalter_laesst_sich_umlegen(ctx):
+def test_schalter_laesst_sich_umlegen(ctx, monkeypatch):
+    # Angebote nur mit eigenem Schlüssel (3.9.17).
+    monkeypatch.setattr(integrations, "bricklink_enabled", lambda: True)
     ctx.post("/api/settings/angebotspreise", json={"an": True})
     assert ctx.get("/api/config").json()["angebotspreise"] is True
     ctx.post("/api/settings/angebotspreise", json={"an": False})

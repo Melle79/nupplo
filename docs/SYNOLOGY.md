@@ -124,7 +124,7 @@ sonst genügt `sudo docker compose pull && sudo docker compose up -d`.)
 
 ## Von unterwegs erreichbar machen
 
-Ohne Portfreigabe im Router: In der App unter **Mehr → Externer Zugriff**
+Ohne Portfreigabe im Router: In der App unter **Mehr → Eigener Cloudflare-Tunnel**
 steckt ein Assistent, der aus einem Cloudflare-Tunnel-Token den fertigen
 `docker-compose`-Block baut. Der Token bleibt dabei im Browser – die App
 speichert ihn nicht und schickt ihn nirgendwohin.

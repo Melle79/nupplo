@@ -245,7 +245,10 @@ def test_einrichtungsassistent_bietet_zwei_faktor_an():
     wurzel = pathlib.Path(__file__).resolve().parent.parent / "frontend"
     html = (wurzel / "index.html").read_text(encoding="utf-8")
     js = (wurzel / "app.js").read_text(encoding="utf-8")
-    assert '<div class="wiz-step" data-step="7" hidden>' in html
+    # Auf dem Server; am eigenen Rechner (Nupplo für Windows) steht an
+    # derselben Stelle der Abgleich – dort gibt es kein Passwort zu schützen.
+    assert '<div class="wiz-step nur-server" data-step="7" hidden>' in html
+    assert '<div class="wiz-step nur-desktop" data-step="7" hidden>' in html
     assert 'id="wiz-tfa-platz"' in html and 'id="tfa-heimat"' in html
     assert html.count('id="tfa-confirm"') == 1, "der Block existiert nur einmal"
     assert "const WIZ_LAST = 8;" in js

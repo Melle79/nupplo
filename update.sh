@@ -38,8 +38,18 @@ if ! command -v docker >/dev/null 2>&1; then
 fi
 
 if [ -f data/brickfolio.db ]; then
-  cp data/brickfolio.db "data/pre-update-$(date +%Y%m%d-%H%M%S).db"
-  ls -t data/pre-update-*.db 2>/dev/null | tail -n +4 | xargs -r rm --
+  # Seit 3.8.2 läuft die Datenbank im WAL-Modus: Was zuletzt geschrieben
+  # wurde, kann noch in brickfolio.db-wal stehen. Die Kopie bekommt die
+  # WAL-Datei unter ihrem eigenen Namen mit – SQLite liest sie beim Öffnen
+  # der Kopie ein. Ohne sie fehlten in der Sicherung die letzten Änderungen.
+  SCHNAPPSCHUSS="data/pre-update-$(date +%Y%m%d-%H%M%S).db"
+  cp data/brickfolio.db "$SCHNAPPSCHUSS"
+  if [ -f data/brickfolio.db-wal ]; then
+    cp data/brickfolio.db-wal "$SCHNAPPSCHUSS-wal"
+  fi
+  for alt in $(ls -t data/pre-update-*.db 2>/dev/null | tail -n +4); do
+    rm -f -- "$alt" "$alt-wal"
+  done
   echo "Datenbank-Schnappschuss angelegt (die letzten 3 werden aufbewahrt)."
 fi
 

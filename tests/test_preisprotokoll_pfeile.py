@@ -33,8 +33,17 @@ def client(tmp_path, monkeypatch):
     return c
 
 
-def punkte(*werte, item="sw0001", typ="minifig", start=1_000_000):
-    """Einen Preisverlauf anlegen: (ts-Versatz, neu, gebraucht)."""
+# Kurz vor jetzt, damit alles im 24-Stunden-Fenster des Protokolls liegt.
+J = int(time.time()) - 23 * 3600
+
+
+def punkte(*werte, item="sw0001", typ="minifig", start=None):
+    """Einen Preisverlauf anlegen: (ts-Versatz, neu, gebraucht).
+
+    Seit 3.9.17 zeigt das Protokoll nur die letzten 24 Stunden – die Punkte
+    liegen deshalb kurz vor jetzt."""
+    if start is None:
+        start = int(time.time()) - 20 * 3600
     with core.db() as conn:
         for i, (neu, gebr) in enumerate(werte):
             conn.execute(
@@ -61,7 +70,7 @@ def test_der_erste_punkt_hat_keinen_vorgaenger(client):
 def test_jeder_artikel_zaehlt_fuer_sich(client):
     """Sonst stünde neben einer Figur der Vorgänger eines Sets."""
     punkte((4.00, 2.00), (5.00, 2.00), item="sw0001")
-    punkte((100.0, 80.0), item="75192-1", typ="set", start=2_000_000)
+    punkte((100.0, 80.0), item="75192-1", typ="set", start=J + 30_000)
     # Die Liste kommt absteigend – je Nummer also den **ersten** nehmen,
     # nicht den letzten. (Genau daran ist dieser Test beim Schreiben
     # zuerst gescheitert: Ein Dictionary behält den letzten Treffer, und
@@ -77,10 +86,10 @@ def test_der_vorgaenger_darf_ausserhalb_der_anzeige_liegen(client):
     """Der eigentliche Fallstrick: 60 fremde Punkte drängen den eigenen
     Vorgänger aus den angezeigten Zeilen – gefunden werden muss er
     trotzdem."""
-    punkte((4.00, 2.00), item="sw0001", start=1_000_000)
+    punkte((4.00, 2.00), item="sw0001", start=J)
     for i in range(60):
-        punkte((9.0, 9.0), item="sw%04d" % (100 + i), start=1_100_000 + i * 60)
-    punkte((7.00, 2.00), item="sw0001", start=1_900_000)
+        punkte((9.0, 9.0), item="sw%04d" % (100 + i), start=J + 3_600 + i * 60)
+    punkte((7.00, 2.00), item="sw0001", start=J + 20_000)
     e = client.get("/api/price_log?limit=50").json()["entries"]
     jung = next(x for x in e if x["item_id"] == "sw0001")
     assert jung["price_new"] == 7.00

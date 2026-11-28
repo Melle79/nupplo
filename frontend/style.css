@@ -263,7 +263,7 @@ button { font-family: inherit; color: var(--ink); }
 .weihnachten #splash .turm i { visibility: visible; }
 .weihnachten #splash .turm::before { content: none; }
 
-/* **Der Stern strahlt** (gewünscht am 22.11.2026).
+/* **Der Stern strahlt** (22.11.2026: „ein Strahlen des Sternes“).
    Immer ein leichter Schein; im Startbild blitzt er beim Aufsetzen einmal
    auf – er fällt als letzter Stein, 0,76 s + 0,55 s – und pulsiert dann
    sacht, bis der Schirm weggeht. `drop-shadow` statt `box-shadow`, weil
@@ -550,6 +550,12 @@ input:focus-visible, textarea:focus-visible, select:focus-visible, button:focus-
   font: 900 12px/1 var(--font); padding: 3px 6px; border-radius: 6px;
 }
 .scan-mehr { box-shadow: none; }
+/* Dieselbe Marke an der Trefferkarte wie am Rahmen im Foto. */
+.card-head .scan-nr {
+  align-self: flex-start; flex: none;
+  background: var(--green); color: #fff;
+  font: 900 12px/1 var(--font); padding: 3px 6px; border-radius: 6px;
+}
 .scan-status { margin-top: 12px; font-weight: 800; color: var(--blue); }
 .spinner {
   display: inline-block; width: 16px; height: 16px; vertical-align: -3px;
@@ -1138,6 +1144,9 @@ span.mf-stern.an {
    Browser für `hidden` mitbringt – Autorenregeln gehen vor. Ohne diese Zeile
    bliebe eine ausgeblendete Zeile sichtbar. */
 .detail-row[hidden] { display: none; }
+/* „Im Bau 2/5" neben „Teil für Teil" in Suche und Steckbrief (3.9.14):
+   ohne das zöge die Zeile das Abzeichen auf Knopfhöhe. */
+.detail-row .badge-bau { align-self: center; }
 
 /* Steht ein Thema, steht nur das Thema da: Eingabefeld und Knopf für etwas,
    das die Automatik längst richtig ausgefüllt hat, sind zwei Zeilen zu viel.
@@ -1211,6 +1220,42 @@ span.mf-stern.an {
   background: var(--toast-bg); color: var(--toast-fg); font-weight: 800; font-size: 14.5px;
   padding: 11px 18px; border-radius: 999px; box-shadow: 0 4px 14px rgba(0,0,0,.25);
   max-width: 90vw; text-align: center;
+}
+
+/* „Auch die übrigen Sets überspringen“ – leise unter den beiden Knöpfen. */
+.setfigs-rest { display: block; margin: 10px auto 0; }
+
+/* ---------- Steckbrief durchblättern ---------- */
+.figinfo-folge { display: flex; align-items: center; gap: 4px; margin-left: auto; margin-right: 8px; }
+.figinfo-folge .sub { font-size: 13px; color: var(--muted); min-width: 3.5em; text-align: center; }
+/* Kleines Zeichen, große Trefffläche (23.11.2026: „die Klickfläche
+   muss nur vergrößert werden“). */
+.figinfo-pfeil {
+  width: 44px; height: 40px; border: none; background: none; cursor: pointer;
+  font-size: 26px; line-height: 1; font-weight: 800; color: var(--ink); border-radius: 10px;
+}
+.figinfo-pfeil:hover:not(:disabled) { background: var(--line); }
+.figinfo-pfeil:disabled { opacity: .25; cursor: default; }
+.figinfo-pfeil[hidden], .figinfo-folge .sub[hidden] { display: none; }
+
+/* Schalter, die ohne Voraussetzung nicht gehen: zu sehen, aber blass. */
+.wahl-kasten.ausgegraut { opacity: .45; cursor: not-allowed; }
+
+/* ---------- Verbindung verloren (nur Windows) ---------- */
+.verbindung-hinweis {
+  position: fixed; left: 50%; transform: translateX(-50%);
+  bottom: calc(env(safe-area-inset-bottom) + 84px); z-index: 105;
+  display: flex; align-items: center; gap: 12px;
+  background: var(--card); color: var(--ink); border: 2px solid var(--ink);
+  border-radius: 14px; box-shadow: var(--shadow);
+  padding: 10px 12px 10px 14px; max-width: min(560px, calc(100vw - 32px));
+  font-size: 14px; line-height: 1.35;
+}
+.verbindung-hinweis[hidden] { display: none; }
+.verbindung-hinweis .sub { color: var(--muted); font-size: 13px; }
+.verbindung-hinweis .mini-btn { flex: none; }
+.verbindung-punkt {
+  flex: none; width: 10px; height: 10px; border-radius: 50%; background: var(--red);
 }
 
 /* ---------- Nach unten ziehen = neu laden ----------
@@ -1332,6 +1377,9 @@ span.mf-stern.an {
 .badge-owned { background: var(--green); color: #fff; border: 1.5px solid var(--ink); }
 
 .badge-wanted { background: var(--yellow); border: 1.5px solid var(--yellow-dark); }
+/* „Gibt es nur in diesem Set“ – hell mit Tintenkante, damit es neben
+   „Hab ich“ (grün) und „Gemerkt“ (gelb) nicht nach Besitz aussieht. */
+.badge-exklusiv { background: var(--surface); color: var(--ink); border: 1.5px solid var(--ink); }
 
 /* ------------------------------------------------------------- Steckbrief */
 
@@ -2249,6 +2297,39 @@ details.help a { color: var(--blue, #0057A6); font-weight: 700; }
   border: 0; border-radius: 0; background: transparent;
 }
 .sb-buehne .img-reload-btn { top: auto; bottom: 10px; right: 10px; }
+/* Weitere Setbilder (Brickmerge): eine Reihe zum Wischen, das gewählte mit
+   Tintenkante. Weißer Grund wie die Bühne, aus demselben Grund. */
+.sb-galerie {
+  display: flex; gap: 8px; overflow-x: auto; padding: 8px 14px;
+  border-bottom: 1px solid var(--line); scrollbar-width: none;
+}
+.sb-galerie::-webkit-scrollbar { display: none; }
+.sb-galerie-bild {
+  flex: 0 0 auto; width: 56px; height: 56px; padding: 3px;
+  background: #FFFFFF; border: 1.5px solid var(--line); border-radius: 8px;
+  cursor: pointer;
+}
+.sb-galerie-bild.an { border-color: var(--ink); }
+/* ‹ › an den Enden der Reihe (3.9.13). `[hidden]` ausdrücklich, weil die
+   eigene display-Regel das Attribut sonst überstimmt. */
+.sb-galerie-huelle { position: relative; }
+.sb-galerie-pfeil {
+  position: absolute; top: 50%; transform: translateY(-50%); z-index: 2;
+  display: flex; align-items: center; justify-content: center;
+  width: 30px; height: 30px; border-radius: 50%; padding: 0;
+  border: 1px solid var(--line); background: var(--card, #FFFFFF);
+  color: var(--ink); font: 900 18px/1 var(--font); cursor: pointer;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, .18);
+}
+.sb-galerie-pfeil.links { left: 4px; }
+.sb-galerie-pfeil.rechts { right: 4px; }
+.sb-galerie-pfeil[hidden] { display: none; }
+.sb-galerie-bild img { width: 100%; height: 100%; object-fit: contain; }
+.kat-modal .sb-galerie { border-bottom: 0; padding: 8px 0; max-width: 100%; }
+/* Suchtreffer (3.9.10): Eckdaten bündig unter der Nummer, Bilderreihe
+   ohne eigene Linie – darunter beginnt schon der gestrichelte Teil. */
+.sug-setdaten .sb-eckdaten { margin: 4px 0 0; }
+.card-modal:not(.steckbrief):not(.kat-modal) .sb-galerie { border-bottom: 0; padding: 8px 0; }
 
 
 .card-modal.steckbrief .modal-inner .card-title { padding: 12px 14px 0; }
@@ -2268,7 +2349,7 @@ details.help a { color: var(--blue, #0057A6); font-weight: 700; }
    `auto-fit` statt drei festen Spalten: Ohne Kaufpreis oder ohne
    Marktpreis liefert `profitLine()` nichts, dann rückt die eine Kachel
    auf die volle Breite. */
-.sb-kacheln {
+.sb-kacheln, .sb-setzahlen {
   display: grid; grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
   gap: 1px; margin: 12px 14px 0;
   background: var(--line); border: 1px solid var(--line);
@@ -2386,6 +2467,11 @@ details.help a { color: var(--blue, #0057A6); font-weight: 700; }
    auf dem Preis-Blatt nicht mehr – der Reiter sagt es schon. */
 .sb-preisblatt { position: relative; padding-top: 6px; }
 .sb-preisblatt > .icon-btn { position: absolute; top: 0; right: 0; z-index: 1; }
+/* Bei Sets steht oben UVP und Brickmerge (`.sb-neupreis`) – oben rechts lag
+   das ↻ dann genau auf der UVP („69,9…“, Sven 10.10.2026). Dort bekommt es
+   eine eigene Zeile über den Durchschnittspreisen, rechtsbündig. */
+.sb-preisblatt > .sb-preis-zeile { display: flex; justify-content: flex-end;
+  margin: 6px 0 4px; }
 
 /* ── Abschnitte als Flächen ─────────────────────────────────────────────
    Die Überschrift bleibt; neu ist, dass der Abschnitt darunter eine eigene
@@ -3016,6 +3102,7 @@ details.help a { color: var(--blue, #0057A6); font-weight: 700; }
   overflow: hidden;
 }
 .kat-kopf select, .kat-kopf input { flex: 1; min-width: 0; }
+.kat-kopf .search-wrap, .detail-row .search-wrap { flex: 1; }
 /* Figuren/Sets nebeneinander. Ohne `flex: none` drückt das Auswahlfeld
    daneben die beiden Knöpfe untereinander – auf 375 px sofort sichtbar. */
 .kat-kopf .seg { display: flex; gap: 6px; flex: none; }
@@ -3597,6 +3684,11 @@ button.cm-chip { cursor: pointer; min-height: 30px; }
 .cm-art button { font-size: 12.5px; }
 .cm-art-schild { background: var(--track); color: var(--ink); }
 .cm-art-filter { margin: 8px 0 2px; }
+/* Land an Angeboten und Filter danach (3.9.x) */
+.cm-land-schild { background: var(--track); color: var(--ink); }
+.cm-land-filter { display: block; margin: 6px 0 2px; max-width: 100%; }
+.cm-land-filter[hidden] { display: none; }
+#meinprofil-felder select, #planer-inhalt select { width: 100%; }
 
 /* Einladung: der Code groß und am Stück markierbar, darunter die Schritte */
 .einladung h3 { margin: 0 0 4px; }
@@ -3633,3 +3725,155 @@ button.cm-chip { cursor: pointer; min-height: 30px; }
    nicht in der Hauptansicht (08.10.2026). */
 .kat-mehr { margin-top: 6px; text-align: center; }
 .kat-mehr summary { cursor: pointer; font-weight: 700; color: var(--muted); }
+
+/* Teil für Teil (3.9.0) */
+.badge-bau { background: var(--yellow, #ffd500); color: var(--ink, #111); border: 1.5px solid var(--ink, #111); }
+.bau-teil { align-items: center; }
+.bau-teil input[type="checkbox"] { cursor: pointer; }
+.bau-teil input[type="checkbox"] { width: 1.3rem; height: 1.3rem; flex: none; }
+.bau-teil.bau-da strong { text-decoration: line-through; opacity: .6; }
+.bau-art { text-transform: uppercase; letter-spacing: .04em; font-size: .72rem; }
+.dg-wie { margin-top: .15rem; }
+/* Prüfhinweis unter dem Scan-Treffer: auffällig genug, dass man ihn vor
+   „Zur Sammlung" liest, aber kein Warnrot – falsch ist ja noch nichts. */
+.scan-dg { margin: 8px 0; padding: 8px 10px; border-radius: 8px;
+  border: 1.5px dashed var(--ink, #111); font-size: 13px; line-height: 1.4; }
+.scan-dg-zeile { margin-top: 4px; cursor: pointer; text-decoration: underline dotted; }
+[data-theme="galaxy"] .scan-dg,
+[data-theme="nova"] .scan-dg { border-color: var(--line); }
+[data-theme="galaxy"] .badge-bau,
+[data-theme="nova"] .badge-bau { border-color: var(--line); }
+
+/* ── Teile, Figuren, Jahr eines Sets (3.9.3) ───────────────────────────
+   Dieselben Kacheln wie Bezahlt/Wert/Gewinn, nur ohne Bedienung. Eigene
+   Klasse statt `.sb-kacheln`: An der hängt die Regel, die die Preiszeile
+   im Kopf ausblendet – die soll ohne Händlerkonto stehen bleiben. */
+.sb-setdaten[hidden] { display: none; }
+.kat-modal .sb-setzahlen { margin: 12px 0 0; width: 100%; }
+.sb-setthema { margin: 8px 14px 0; font-size: .92rem; }
+.kat-modal .sb-setthema { margin: 8px 0 0; text-align: center; }
+.sb-setthema .sb-label { margin-right: 4px; }
+/* Eckdaten eines Sets: so leise wie die Unterzeile im Kopf. */
+.sb-eckdaten {
+  margin: 6px 14px 0; font-size: .85rem; line-height: 1.45;
+  color: var(--muted);
+}
+.kat-modal .sb-eckdaten { margin: 8px 0 0; text-align: center; }
+/* UVP und Brickmerge auf dem Blatt „Preise“: zwei schlichte Zeilen. */
+.sb-neupreis:empty { display: none; }
+.sb-np-zeile {
+  display: flex; justify-content: space-between; gap: 12px;
+  padding: 8px 0; border-bottom: 1px dashed var(--line); font-size: .95rem;
+}
+.sb-np-zeile a { color: var(--ink); font-weight: 700; text-decoration-style: dotted; }
+.kat-modal .sb-neupreis { margin-top: 8px; width: 100%; }
+/* Wie die übrigen Verweise nach draußen (`.set-link.ext`): Tinte, gepunktet. */
+.sb-setthema a { color: var(--ink); font-weight: 700; text-decoration-style: dotted; }
+
+/* Teil für Teil: Bild und Name sind ein Verweis zu BrickLink, nur das
+   Kästchen hakt ab (3.9.13). */
+.bau-teil-link { display: flex; align-items: center; gap: inherit; flex: 1;
+  min-width: 0; color: inherit; text-decoration: none; }
+.bau-teil-link:hover strong { text-decoration: underline; }
+
+/* Unterscheidende Teile unter „Leicht zu verwechseln" (3.9.14): links die
+   offene Figur, ↔, rechts der Doppelgänger, je mit Nummer darunter. */
+.dg-teile { display: flex; align-items: center; gap: 8px; margin-top: 6px;
+  flex-wrap: wrap; }
+.dg-seite { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.dg-bilder { display: flex; gap: 4px; }
+.dg-nr { font: 800 10px/1.1 var(--font); color: var(--muted); }
+.dg-pfeil { font: 900 16px/1 var(--font); color: var(--muted); }
+.dg-teil { display: flex; align-items: center; justify-content: center; cursor: zoom-in;
+  width: 44px; height: 44px; padding: 2px; background: #FFFFFF;
+  border: 1px solid var(--line); border-radius: 6px; }
+.dg-teil img { width: 100%; height: 100%; object-fit: contain; }
+.dg-teil.dg-ohne { border-style: dashed; background: transparent;
+  font: 800 10px/1 var(--font); color: var(--muted); }
+
+/* Ein Teil groß (3.9.14). */
+.teil-gross-overlay { position: fixed; inset: 0; z-index: 1200;
+  background: rgba(0, 0, 0, .55); display: flex; align-items: center;
+  justify-content: center; padding: 16px; }
+.teil-gross { position: relative; background: var(--card, #FFFFFF);
+  border-radius: 16px; padding: 18px; max-width: 360px; width: 100%;
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
+  text-align: center; }
+.teil-gross img { width: 220px; max-width: 100%; height: 220px;
+  object-fit: contain; background: #FFFFFF; border-radius: 10px; margin-bottom: 6px; }
+.teil-gross a { margin-top: 6px; font-weight: 800; }
+
+/* Unter dem Scan-Treffer übernimmt ein Tipp auf die Nummer diese Figur. */
+.dg-nehmen { border: 1px solid var(--line); background: transparent;
+  border-radius: 6px; padding: 2px 6px; cursor: pointer; color: var(--ink); }
+.dg-nehmen:hover { background: var(--line); }
+
+/* Nupplo für Windows (Desktop-Modus, `backend/desktop.py`): Am eigenen
+   Rechner gibt es kein Passwort, keine Anmeldung und kein Update über die
+   Web-App – das Programm kommt mit dem Installer. Abmelden ließe einen vor
+   einer Anmeldung stehen, deren Passwort niemand kennt. Weg also mit
+   allem, was nur auf einem Server Sinn hat. */
+body.desktop .wm-se, body.desktop .nur-server, body.desktop #admin-panel,
+body.desktop #connect-card, body.desktop #external-access-card,
+body.desktop #update-card, body.desktop #update-bar,
+body.desktop #koppeln-block { display: none !important; }
+/* Und umgekehrt: was es nur am eigenen Rechner gibt (Abgleich). */
+body:not(.desktop) .nur-desktop { display: none !important; }
+/* Live-Scanner (Windows 0.5.1): dieselbe Seite wie Scannen, im Live-Modus
+   ohne Fotoknopf und mit Vergleichsbild und Verlauf – wie `ScanAnsicht(
+   bildschirm: true)` in der Mac-App. */
+#view-scan:not(.live-modus) .nur-live,
+#view-scan.live-modus .nur-scan,
+#view-scan.live-modus #scan-alle { display: none !important; }
+.live-paar { display: contents; }
+#view-scan.live-modus .live-paar {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 12px; align-items: start;
+}
+#view-scan.live-modus .live-paar > [hidden] { display: none !important; }
+#view-scan.live-modus .scan-preview img { max-height: 260px; }
+.live-katalog {
+  margin-top: 18px; text-align: center; background: #fff;
+  border: 3px solid var(--ink); border-radius: 12px; padding: 8px;
+}
+.live-katalog img { max-width: 100%; max-height: 230px; object-fit: contain; }
+.live-katalog span { display: block; font-size: 13px; font-weight: 700; margin-top: 4px; color: #333; }
+.livescan-stand { font-size: 12px; font-weight: 700; color: var(--muted); margin-left: 6px; }
+.livescan-schalter { display: flex; flex-wrap: wrap; gap: 6px 18px; align-items: center; margin-top: 8px; }
+.livescan-haken { font-size: 14px; font-weight: 700; display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+.livescan-haken input { width: auto; margin: 0; flex: none; }
+.livescan-schalter .livescan-stufe { margin-top: 0; margin-left: auto; display: flex; align-items: center; white-space: nowrap; }
+.livescan-schalter .livescan-stufe select { width: auto; }
+#view-scan.live-modus #scan-tipp { display: none !important; }
+.livescan-stufe select { margin-left: 6px; }
+.live-verlauf-liste { display: flex; flex-direction: column; gap: 6px; }
+/* Im Live-Scanner entscheiden die Haken an den Ansichten über das Foto. */
+#view-scan.live-modus #scan-results .wahl-kasten { display: none !important; }
+.live-ansichten-liste { display: flex; flex-wrap: wrap; gap: 8px; }
+.live-ansicht {
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
+  border: 2px solid var(--line); border-radius: 10px; padding: 4px;
+}
+.live-ansicht.an { border-color: var(--ink); background: var(--track); }
+.live-ansicht button { padding: 0; border: 0; background: none; cursor: zoom-in; }
+.live-ansicht img { width: 72px; height: 72px; object-fit: cover; border-radius: 6px; display: block; }
+.live-ansicht label { font-size: 12px; font-weight: 700; display: flex; align-items: center; gap: 4px; }
+.live-ansicht input { width: auto; margin: 0; }
+.live-verlauf-zeile {
+  display: flex; align-items: center; gap: 10px; width: 100%; text-align: left;
+  background: var(--card); border: 2px solid var(--line); border-radius: 10px;
+  padding: 6px 8px; cursor: pointer; color: inherit; font: inherit;
+}
+.live-verlauf-zeile.aktiv { border-color: var(--ink); background: var(--track); }
+.live-verlauf-zeile img { width: 48px; height: 48px; object-fit: cover; border-radius: 6px; flex: none; }
+.live-verlauf-zeile .wer { flex: 1; min-width: 0; }
+.live-verlauf-zeile .wer b { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.live-verlauf-zeile .wer small { color: var(--muted); }
+.livescan-wahl-box { max-width: min(96vw, 1400px); }
+.livescan-flaeche { position: relative; cursor: crosshair; user-select: none; line-height: 0; }
+.livescan-flaeche img { max-width: 100%; max-height: 70vh; border: 2px solid var(--ink, #1b1b1b); }
+#livescan-rahmen { position: absolute; border: 3px solid #ffd500; background: rgba(255, 213, 0, .18);
+  box-shadow: 0 0 0 1px #1b1b1b; pointer-events: none; }
+
+/* Vorhandene Cloud-Ordner zum Antippen (Windows 0.8.0). */
+.ordner-vorschlaege { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.ordner-vorschlaege .btn { width: auto; margin-top: 0; padding: 8px 14px; font-size: 14px; }

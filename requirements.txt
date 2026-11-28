@@ -11,3 +11,5 @@ segno>=1.6
 pywebpush>=2.0
 # PDF-Abzug von Listen (Einkaufs-/Verkaufsliste)
 fpdf2>=2.8
+# Data-Matrix-Code auf Sammelfiguren-Schachteln (cmf.py), Apache-2.0
+zxing-cpp>=3.0

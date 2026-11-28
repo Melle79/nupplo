@@ -2,7 +2,7 @@
 
     python3 docs/logo/weihnachten/erzeugen.py <Zielordner>
 
-Erzeugt Fassung A (gewählt am 22.11.2026) und B (grüner Baum mit
+Erzeugt Fassung A (gewählt, Sven 22.11.2026) und B (grüner Baum mit
 Kugeln, verworfen). Nur A liegt hier im Repo."""
 import re, sys, os
 SRC=os.path.join(os.path.dirname(os.path.abspath(__file__)),"..")
@@ -11,7 +11,7 @@ FARBEN=[("#00963E","#00702E"),("#0057A6","#003F7A"),("#D01012","#A50D0F"),("#FFC
 n=[0]
 def stein(x0,x1,y0,y1,farbe,dunkel,stroke=None):
     h=y1-y0; R=0.4*h; r=0.2*h
-    R=min(R,(x1-x0)/2)
+    R=min(R,(x1-x0)/2); 
     d=(f"M{x0+R:.3f},{y0:.3f} H{x1-R:.3f} Q{x1:.3f},{y0:.3f} {x1:.3f},{y0+R:.3f} V{y1-r:.3f} "
        f"Q{x1:.3f},{y1:.3f} {x1-r:.3f},{y1:.3f} H{x0+r:.3f} Q{x0:.3f},{y1:.3f} {x0:.3f},{y1-r:.3f} "
        f"V{y0+R:.3f} Q{x0:.3f},{y0:.3f} {x0+R:.3f},{y0:.3f} Z")

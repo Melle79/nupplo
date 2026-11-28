@@ -29,6 +29,22 @@ import pytest  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
+def kein_echter_preis_hub(monkeypatch):
+    """Kein Test spricht mit dem echten Hub.
+
+    Seit Teile- und Setdatei vom Hub kommen (3.9.25), legte jeder Test, der
+    die Datei holt, ohne diese Sperre einen Preis-Zugang auf dem Live-Hub an
+    – gemerkt am 17.10.2026 mit einer Netzsperre im Testlauf. Die Adresse
+    zeigt deshalb ins Leere, und der Zugang ist ein fester Testwert.
+    """
+    monkeypatch.setenv("PREIS_HUB_URL", "http://hub.test")
+    import hubpreise
+    # Wer das Anlegen selbst prüft (test_hubpreise), holt sich das echte zurück.
+    monkeypatch.setattr(hubpreise, "_echter_token", hubpreise._token, raising=False)
+    monkeypatch.setattr(hubpreise, "_token", lambda: "prz_test")
+
+
+@pytest.fixture(autouse=True)
 def hintergrundlaeufe_abwarten():
     """Nach jedem Test warten, bis kein fremder Faden mehr läuft.
 
@@ -106,3 +122,31 @@ def add_contents(conn, set_no, fig_no, qty=1):
         "INSERT INTO set_contents (set_no, fig_no, qty) VALUES (?, ?, ?)",
         (set_no, fig_no, qty),
     )
+
+
+@pytest.fixture
+def mit_eigenem_schluessel(monkeypatch):
+    """Für Tests, die den Weg über BrickLink prüfen.
+
+    Seit 3.9.17 hängt die Preisquelle am eigenen Schlüssel (`hubpreise.an`).
+    Ohne diese Festlegung entschied die gemeinsame Vorgabe-Datenbank: War sie
+    noch leer, scheiterte `an()` an der fehlenden Tabelle und es ging zu
+    BrickLink; hatte ein früherer Test sie eingerichtet, zum Preisdienst.
+    Je nach Reihenfolge waren dieselben Tests grün oder rot (17.10.2026).
+    """
+    import hubpreise
+    monkeypatch.setattr(hubpreise, "an", lambda: False)
+
+
+@pytest.fixture(autouse=True)
+def kein_preisverfall_nebenbei(monkeypatch):
+    """Der Verfall vor Anfragen (`main.preise_verfallen_lassen`) läuft
+    höchstens einmal je Minute – ob er in einem Test zuschlug, hing also an
+    der Reihenfolge der Tests (test_wertverlust, 17.10.2026). In Tests nur,
+    wo er gewollt ist: Wer ihn prüft, setzt `main._verfall_zuletzt[0] = 0`."""
+    try:
+        import main
+    except Exception:
+        return
+    if hasattr(main, "_verfall_zuletzt"):    # manche Tests tauschen main aus
+        monkeypatch.setattr(main, "_verfall_zuletzt", [float("inf")])

@@ -14,6 +14,10 @@ import integrations
 import main
 from fastapi.testclient import TestClient
 
+# Prüft den Weg über BrickLink, siehe `mit_eigenem_schluessel` in conftest.
+pytestmark = pytest.mark.usefixtures("mit_eigenem_schluessel")
+
+
 
 @pytest.fixture
 def ctx(tmp_path, monkeypatch):

@@ -36,12 +36,13 @@ def fuellen(anzahl: int):
 
 def tagesbedarf(namen_je_lauf: int, artikel: int) -> int:
     """Was ein Tag insgesamt an BrickLink-Abrufen kostet."""
-    preise = 0
     with core.db() as conn:
-        for table in main.PRICE_TABLES:
-            n = conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
-            preise += main.preis_stapel(n) * 2 * main.PRICE_LAEUFE_JE_TAG
-    return preise + namen_je_lauf * main.PRICE_LAEUFE_JE_TAG
+        n = sum(conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+                for table in main.PRICE_TABLES)
+    # Seit 3.9.17 stündlich (Preise), Namen weiter zweimal am Tag.
+    preise = min(main.preis_stapel(n) * main.PRICE_LAEUFE_JE_TAG,
+                 -(-n * 86400 // main.PRICE_STALE_SECONDS)) * 2 if n else 0
+    return preise + namen_je_lauf * main.NAMEN_LAEUFE_JE_TAG
 
 
 @pytest.mark.parametrize("artikel", [0, 900, 3000, 9000])

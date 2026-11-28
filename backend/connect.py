@@ -45,6 +45,7 @@ from pydantic import BaseModel
 
 import connect_noise as noise
 import core
+import desktop
 
 router = APIRouter()
 
@@ -67,6 +68,14 @@ LEBENSZEICHEN = 30
 # Plätze dauerhaft besetzt. Ein echter Handschlag ist eine Nachricht hin und
 # eine zurück, das dauert Millisekunden.
 HANDSCHLAG_FRIST = 10
+# So lange überstehen Kanäle einen Abriss der Leitung zum Vermittler (3.9.34).
+# Cloudflare kappt die Leitung ab und zu ohne Abschied („no close frame“),
+# auf einer Testinstanz neunmal in 48 Stunden. Bisher flog dabei jedes Gerät
+# raus; jetzt verbindet die Instanz neu und macht mit denselben Kanälen
+# weiter. Der Vermittler wartet ebenso lange, bevor er die Geräte trennt.
+GNADE = 20
+# Was während der Gnadenfrist an Geräte geht, wartet hier – höchstens so viel.
+PUFFER_MAX = 8 * 1024 * 1024
 # Kopfzeilen, die nur für eine Verbindung gelten.
 VERBINDUNGSKOPF = {"host", "connection", "keep-alive", "transfer-encoding",
                    "content-length", "upgrade", "proxy-connection", "te"}
@@ -339,6 +348,9 @@ class Verbinder:
         self.kanaele: dict[int, Kanal] = {}
         self.zustand = {"verbunden": False, "seit": None, "fehler": None}
         self.ed25519 = self.x25519 = None
+        # Während der Gnadenfrist: was rausgehen soll, und seit wann getrennt.
+        self.puffer: list[bytes] = []
+        self.getrennt_seit: float | None = None
 
     # --- Steuerung (aus Threads der Endpunkte aufrufbar)
 
@@ -384,21 +396,43 @@ class Verbinder:
         if self.ws is not None:
             try:
                 await self.ws.send(daten)
+                return
             except Exception:
                 pass            # Leitung weg – das merkt `_laufen`
+        # Ohne Leitung: aufheben, bis sie wieder steht. Die Noise-Nummern
+        # verlangen die Reihenfolge – deshalb nichts verwerfen, sondern bei
+        # Überlauf alle Kanäle schließen.
+        if not self.kanaele:
+            return
+        self.puffer.append(daten)
+        if sum(map(len, self.puffer)) > PUFFER_MAX:
+            log("Puffer voll – Kanäle zu")
+            await self._aufraeumen()
+
+    async def _nachholen(self, ws):
+        while self.puffer:
+            await ws.send(self.puffer.pop(0))
 
     async def _laufen(self):
         import websockets
         pause = 1.0
         iid = instanz_id(self.ed25519)
         while True:
-            adresse = f"{self.vermittler}/v1/instanz/{iid}?{nachweis(self.ed25519)}"
+            # `weiter=1`: Diese Instanz führt ihre Kanäle über einen Abriss
+            # hinweg weiter – der Vermittler soll die Geräte dann nicht trennen.
+            adresse = f"{self.vermittler}/v1/instanz/{iid}?{nachweis(self.ed25519)}&weiter=1"
             try:
                 async with websockets.connect(adresse, max_size=2 * 1024 * 1024,
                                               ping_interval=None, open_timeout=20) as ws:
+                    if self.getrennt_seit is not None \
+                            and time.monotonic() - self.getrennt_seit > GNADE:
+                        await self._aufraeumen()
+                    self.getrennt_seit = None
+                    await self._nachholen(ws)
                     self.ws = ws
                     self.zustand = {"verbunden": True, "seit": int(time.time()), "fehler": None}
-                    log("verbunden mit", self.vermittler)
+                    log("verbunden mit", self.vermittler,
+                        f"({len(self.kanaele)} Kanäle weiter offen)" if self.kanaele else "")
                     pause = 1.0
                     puls = asyncio.create_task(self._lebenszeichen(ws))
                     try:
@@ -417,7 +451,13 @@ class Verbinder:
                 grund = f"abgewiesen: {e.response.body.decode(errors='replace') or e.response.status_code}"
             except Exception as e:
                 grund = f"{type(e).__name__}: {e}"
-            await self._aufraeumen()
+            # Nicht gleich alles schließen: Die Kanäle warten GNADE Sekunden
+            # auf die neue Leitung.
+            self.ws = None
+            if self.getrennt_seit is None:
+                self.getrennt_seit = time.monotonic()
+            if time.monotonic() - self.getrennt_seit > GNADE:
+                await self._aufraeumen()
             self.zustand = {"verbunden": False, "seit": None, "fehler": grund}
             # Wachsende Pause mit Zufall: Nach einem Ausfall des Vermittlers
             # sollen nicht alle Instanzen im selben Augenblick anklopfen.
@@ -428,6 +468,7 @@ class Verbinder:
 
     async def _aufraeumen(self):
         self.ws = None
+        self.puffer.clear()
         for k in list(self.kanaele.values()):
             await k.schliessen(melden=False)
         self.kanaele.clear()
@@ -463,7 +504,11 @@ class Verbinder:
                 k = self.kanaele.get(nummer)
                 if k:
                     await k.schliessen(melden=False)
-            elif art == DATEN and nummer in self.kanaele:
+            elif art == DATEN and nummer not in self.kanaele:
+                # Unbekannter Kanal, etwa nach einem Neustart der Instanz:
+                # zumachen, damit das Gerät neu anklopft statt zu warten.
+                await ws.send(_rahmen(SCHLIESSEN, nummer))
+            elif art == DATEN:
                 kanal = self.kanaele[nummer]
                 try:
                     await kanal.eingang(nutzlast)
@@ -591,6 +636,11 @@ class ConnectBody(BaseModel):
 def connect_umschalten(body: ConnectBody, user: dict = Depends(_admin())):
     if body.nur_2fa is not None:
         core.set_setting("connect_nur_2fa", "1" if body.nur_2fa else "0")
+    if body.an and desktop.an():
+        # Svens Entscheidung vom 16.10.2026: Nupplo für Windows wird keine
+        # Connect-Instanz. Verbunden wird über den eigenen Cloud-Ordner oder
+        # über Connect mit einer SE – nicht mit dem Rechner selbst.
+        raise HTTPException(409, "Am eigenen Rechner gibt es keinen Zugriff von außen")
     if body.an is not None:
         verbinder.umschalten(body.an)
     return {"an": core.get_setting("connect_an") == "1",

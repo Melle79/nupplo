@@ -99,6 +99,6 @@ def test_der_scan_reicht_kein_meta_durch():
     """Die Scan-Ergebnisse kommen in einem Stück – es gibt keine zweite
     Seite und damit nichts, ab dem die teuren Abrufe ansetzen müssten."""
     quelle = (FRONTEND / "app.js").read_text(encoding="utf-8")
-    m = re.search(r"function renderScanResults\(items\) \{.*?\n\}\n", quelle, re.S)
+    m = re.search(r"function renderScanResults\(items(?:, nummern = null)?\) \{.*?\n\}\n", quelle, re.S)
     assert m
     assert "enrichSuggestions(items);" in m.group(0)

@@ -19,7 +19,7 @@
   } catch (e) { /* privater Modus o. Ä. */ }
 
   /* **Weihnachten: Der Turm wird zum Baum**, vom ersten Advent bis
-     Dreikönig (Wunsch vom 22.11.2026). Hier und nicht in `app.js`, damit schon
+     Dreikönig (22.11.2026). Hier und nicht in `app.js`, damit schon
      der Startbildschirm den Baum zeigt und nicht erst den Turm.
 
      Der erste Advent wandert: Er ist der vierte Sonntag vor dem 25.12.,

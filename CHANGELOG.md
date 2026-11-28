@@ -1,35 +1,438 @@
 # Changelog
 
-## 3.8.4 – November 2026
+## 3.10.0 – November 2026
+
+Das große Update zum Start der Apps für iPhone, iPad und Mac. Es fasst die
+Fassungen 3.9.0 bis 3.9.39 zusammen, die einzeln unten stehen.
+
+### Das Wichtigste
+- **Preise ohne eigenen BrickLink-Zugang** für Star Wars und Herr der Ringe
+  über den Nupplo-Preisdienst. Mit eigenem Schlüssel holt Nupplo alle Preise
+  selbst, und mehrere Geräte mit demselben Schlüssel teilen sich BrickLinks
+  Tageskontingent über die SE.
+- **Preise verschwinden nicht mehr.** Der letzte Preis bleibt stehen, ab
+  48 Stunden mit „Stand <Datum>“. Geräte können Preise beim Abgleich nicht
+  mehr überschreiben.
+- **Teil für Teil, Doppelgänger und Set-Steckbrief:** Teile einer Figur auf
+  der Wunschliste abhaken, die Prüffrage bei fast gleichen Figuren unter dem
+  Scan-Treffer, Teile, Figuren, Jahr und Themenwelt zu jedem Set.
+- **Deutsche Suche** auch für Sets und Einzelteile, Sammelfiguren-Schachteln
+  am Code erkennen (in den mobilen Apps).
+- **Externer Zugriff ohne Portfreigabe** übersteht kurze Abrisse der
+  Leitung, ohne die Geräte zu trennen.
+- **Abgleich mit den Apps** für iPhone, iPad, Mac und Windows.
+
+## 3.9.38 – November 2026
+### Neu
+- **Vom ersten Advent bis 06.01. wird der Turm im Logo zum Weihnachtsbaum**
+  (22.11.2026). Grüner, blauer und roter Stein werden nach oben
+  schmaler, der gelbe wird zum Stern. So bleiben die vier Farben, und man
+  sieht trotzdem einen Baum. Das gilt für Startbildschirm (der Stern fällt
+  zuletzt auf die Spitze), Kopfleiste und Anmeldung, wo die Noppenreihe zu
+  einem kleinen Baum wird. Danach steht von selbst wieder der Turm da.
+  - Der erste Advent liegt jedes Jahr anders (27.11. bis 03.12.).
+    `theme-boot.js` rechnet ihn aus, statt ein festes Datum zu nehmen, und
+    setzt die Klasse vor dem ersten Bild, damit der Startbildschirm nicht
+    erst den Turm zeigt.
+  - Zum Ansehen außerhalb der Zeit: `?weihnachten=an`, zurück mit
+    `?weihnachten=auto`. Das merkt sich der Browser.
+  - Außerhalb des Startbilds ist der Baum ein Bild (`icons/turm-baum.svg`):
+    Aus CSS-Steinen wurden in der Kopfleiste unscharfe Streifen.
+  - Vorlagen und Erzeuger in `docs/logo/weihnachten/`.
+## 3.9.39 – November 2026
+### Neu
+- **BrickLink-Verbrauch über alle Geräte geteilt.** Nutzen mehrere Geräte
+  denselben eigenen BrickLink-Schlüssel, melden sie ihren Tagesverbrauch an
+  die SE (`POST /api/sync/bl-verbrauch`) und erfahren, was die anderen
+  abgerufen haben. Erkannt wird der gemeinsame Schlüssel an einem Abdruck,
+  nicht am Schlüssel selbst (SHA-256 über `nupplo-bl-v1`, Consumer Key und
+  Token, 20 Zeichen). Gemeinsam hören die Geräte bei 4.500 Abrufen auf, mit
+  Abstand zu BrickLinks 5.000. Nutzt die SE denselben Schlüssel, zählt ihr
+  eigener Verbrauch mit; sie selbst begrenzt sich dabei nicht. Meldet ein
+  Gerät BrickLinks Limit, gilt es für alle bis morgen. Gespeichert werden
+  nur Zahlen je Tag, nach drei Tagen fallen sie weg.
+### Neu (Desktop-Modus, siehe `windows/CHANGELOG.md` 0.8.0)
+- **Abgleich über Google Drive.** Der Cloud-Ordner-Abgleich kann jetzt
+  auch über die Google-Drive-Schnittstelle laufen statt über einen Ordner
+  auf der Platte (`backend/ablage.py`, Anmeldung in
+  `backend/google_konto.py`). Warum: Abgleich ohne SE und ohne dass Nupplo
+  Sammlungen speichert, auch mit Android-Telefonen (25.11.2026).
+  Nur im Desktop-Modus; die SE selbst ändert sich nicht.
+
+## 3.9.37 – November 2026
+### Behoben (Desktop-Modus, siehe `windows/CHANGELOG.md` 0.5.3)
+- **Der Abgleich der Windows-App löschte Preise auf der SE.** Am 08.11.2026
+  bei einer Testinstallation: Nach dem ersten Abgleich mit seiner SE :8300 schickte die
+  Windows-App 464 Sammlungszeilen mit leeren Preisen zurück, und die SE
+  übernahm sie. Zwei Ursachen: Dieser Laborstand leerte zentrale
+  Figurenpreise noch nach 26 Stunden (behoben auf der SE seit 3.9.31), und
+  BrickLink liefert seit dem 05.11. nichts – also waren alle Preise „alt“,
+  wurden geleert, und jede geleerte Zeile galt als Änderung. Jetzt:
+  - Der Stand der SE 3.9.31/3.9.32 ist hier eingemischt: Preise
+    verschwinden nicht, ab 48 Stunden stehen sie mit „Stand …“.
+  - Der Abgleich schickt keine Preisfelder mehr (`price_new`,
+    `price_used`, `price_data`, `price_updated_at`, `price_region`,
+    `price_currency`). Ändern sich an einer Zeile nur Preise, geht sie gar
+    nicht hinaus – sonst hätte ihre neue Änderungszeit eine echte Änderung
+    auf der SE überschrieben. Dafür merkt sich der Abgleich je Satz einen
+    Abdruck der übrigen Felder (`abgleich_saetze.abdruck`).
+  - Beim Holen bleibt ein Preis hier stehen, wenn von der SE keiner oder
+    ein älterer kommt. Die Test-SE hat ihre Preise vorerst verloren; die
+    Windows-App soll sie deshalb nicht auch verlieren.
+
+## 3.9.36 – November 2026
+### Neu (Desktop-Modus, siehe `windows/CHANGELOG.md` 0.5.2)
+- **Live-Scanner: Ansichten zum Anhaken**, das Letzte, was gegenüber der
+  Mac-App noch fehlte (08.11.2026: „mach bitte fertig“). Jede
+  Aufnahme derselben Figur wird eine Ansicht, höchstens sechs; angehakte
+  kommen beim Hinzufügen als eigene Fotos an den Artikel. Den Schalter
+  „Mein Foto zusätzlich am Artikel“ gibt es im Live-Scanner dafür nicht.
+
+## 3.9.35 – November 2026
+### Geändert (Desktop-Modus, siehe `windows/CHANGELOG.md` 0.5.1)
+- **Live-Scanner als eigener Eintrag links unter Scannen**, wie in der
+  Mac-App. 07.11.2026, zur Karte im Tab Scannen: „Den hätte ich aber
+  gern in der Menüleiste links, genau so wie in der Mac-App. Auch mit den
+  Daten und so weiter.“ Er öffnet die Scan-Seite im Live-Modus: ohne
+  Fotoknopf, Aufnahme und Katalogbild des besten Treffers nebeneinander,
+  drei Treffer, Verlauf der Erkennungen, „🧍 Nur Figuren“, „🔔 Ton bei
+  Wunsch“, Strg+L für „Jetzt erkennen“. Ein leerer Abzug der Automatik
+  ersetzt den letzten Treffer nicht mehr.
+
+## 3.9.34 – November 2026
+### Neu (Desktop-Modus, siehe `windows/CHANGELOG.md` 0.5.0)
+- **Live-Scanner im Tab Scannen.** Bis hierher war er ein eigenes Programm
+  in eigenem Fenster, das sich bei der SE anmelden musste. 07.11.2026:
+  „mir gefällt es am besten, wenn es wie in der Mac-App wäre. Komplett
+  integriert.“ Neues Modul `backend/bildschirm.py`: Bildschirmfoto zum
+  Aufziehen des Bereichs, ein Wächter mit den Regeln des bisherigen
+  Scanners (Stillstand, Drehteller, nicht zweimal dasselbe Bild,
+  Mindestabstand, Obergrenze je Minute) und das ausgelöste Bild. Die App
+  schickt es durch denselben Weg wie ein hineingezogenes Foto, also gleiche
+  Erkennung, Prüffrage und „In die Sammlung“. Endpunkte nur im
+  Desktop-Modus; auf dem NAS gibt es sie nicht.
+- Der Knopf „Live-Scanner öffnen“ aus 3.9.33 ist durch die Karte ersetzt.
+
+## 3.9.33 – November 2026
+3.9.31 und 3.9.32 sind auf dem Zweig zum Schutz des Preisdienstes schon
+vergeben; damit sich die Nummern nicht doppeln, geht es hier mit 3.9.33
+weiter.
+
+### Behoben (Desktop-Modus, siehe `windows/CHANGELOG.md` 0.4.2)
+- **Der Assistent lag über der App.** Am Rechner ist die App beim Start schon
+  sichtbar, weil das Programm das Konto selbst anlegt. Der Assistent wurde
+  darübergelegt und blieb nach „Beitreten“ stehen, auch im Tab Sammlung.
+  Jetzt blendet er die App aus, und nach „Beitreten“ oder „Verbinden“ geht
+  es von selbst zum nächsten Schritt. Nach „Hier anlegen“ nicht: Dann steht
+  der Code da, den das zweite Gerät braucht.
+- **Knopf „Live-Scanner öffnen“** im Tab Scannen, nur im Fenster von Nupplo
+  für Windows.
+
+## 3.9.30 – November 2026
+### Neu
+- `GET /api/ordner/qr` (nur Desktop-Modus): der Code des Cloud-Ordners als
+  QR-Code, siehe `windows/CHANGELOG.md` 0.4.1 und `docs/ORDNER-ABGLEICH.md`.
+
+## 3.9.29 – November 2026
+### Neu
+- **Abgleich über einen eigenen Cloud-Ordner** im Desktop-Modus (Nupplo für
+  Windows 0.4.0, siehe `windows/CHANGELOG.md`). Neues Modul
+  `backend/ordner.py`, Format in `docs/ORDNER-ABGLEICH.md`. Auf dem NAS
+  gibt es die Endpunkte nicht.
+- Schlüssel und Pfad des Ordners stehen in `GEHEIME_SETTINGS`: Der Pfad
+  trägt unter Windows meist den Benutzernamen und hat in einem öffentlichen
+  Fehlerbericht nichts zu suchen.
+## 3.9.34 – November 2026
+### Behoben
+- **Externer Zugriff übersteht kurze Abrisse.** Die Leitung zum Vermittler
+  reißt ab und zu ohne Abschied ab („no close frame received or sent“), auf
+  einer Instanz neunmal in 48 Stunden. Bisher flog dabei jedes verbundene
+  Gerät raus. Jetzt verbindet die Instanz sofort neu und führt die Kanäle
+  der Geräte weiter. Was in der Lücke an ein Gerät gehen sollte, wartet und
+  kommt danach in derselben Reihenfolge an. Steht die Leitung nach 20
+  Sekunden nicht wieder, gehen die Kanäle zu wie bisher. Dafür braucht es
+  den Vermittler vom November 2026; mit dem älteren bleibt alles, wie es war.
+- Kennt die Instanz einen Kanal nicht mehr, etwa nach einem Neustart,
+  schließt sie ihn. Das Gerät klopft dann neu an, statt auf Antwort zu warten.
+
+## 3.9.33 – November 2026
+### Behoben
+- **Ein Gerät löscht keine Preise mehr.** Der Abgleich nimmt Marktpreise
+  (Neu, Gebraucht, Preisdaten, Stand, Region, Währung) nicht mehr von
+  Geräten an. Die Preise holt allein die Instanz, die Geräte bekommen sie
+  beim Holen. Bisher konnte ein Gerät, das seine Preise selbst hatte
+  verfallen lassen, die Einträge mit leerem Preis zurückschicken, und die
+  Sammlung stand ohne Preise da. Kaufpreise bleiben, wie sie sind.
+
+## 3.9.32 – Oktober 2026
+### Neu
+- **Preisdienst nur für Nupplo (Stufe 1).** Jeder Aufruf unter `/v1/preise/`
+  trägt jetzt Programm und Fassung (`x-nupplo-programm: se/3.9.32`), die Zeit
+  und ein HMAC-Zeichen. Weicht die eigene Uhr mehr als 10 Minuten vom Hub ab,
+  merkt sich die Instanz den Versatz.
+- **Notbremse des Hubs** (503 `abgeschaltet`) ist kein Fehler: Die Preise
+  bleiben, wie sie sind, und frühestens nach `Retry-After` wird es wieder
+  versucht. 429 beim Zugang heißt: heute keine neuen Zugänge, später erneut.
+
+### Geändert
+- Preise aus dem Preisdienst gehen nur noch auf Cent gerundet in Sammlung,
+  Anzeige und Abgleich. Die Nachkommastellen dahinter sind das Wasserzeichen
+  des Preisdiensts und bleiben im lokalen Abzug.
+
+## 3.9.31 – Oktober 2026
+### Geändert
+- **Preise verschwinden nicht mehr.** Bisher verloren Figurenpreise aus dem
+  Preisdienst nach 26 Stunden ihren Betrag. Holte der Dienst eine Figur nicht
+  rechtzeitig nach, stand sie in der Sammlung ohne Preis da (am 30.10.2026
+  in einer Testsammlung 173 statt 161 Einträge ohne Preis). Jetzt bleibt der
+  letzte Preis stehen, bis ein neuerer kommt. Ist er älter als 48 Stunden,
+  steht „Stand <Datum>“ dabei, wie beim Hub (`datum_ab_stunden`). Das gilt
+  für Figuren und Sets, für die Sammlung, das Preisfenster, den
+  Preisverlauf und das Preisprotokoll.
+
+## 3.9.30 – Oktober 2026
+### Geändert
+- **Ein alter Setpreis verschwand aus dem Sammlungswert, obwohl der
+  Preisdienst ihn bis zur nächsten Erneuerung behalten sollte.** Der Hub
+  liefert alte Setpreise mit ihrem Abrufdatum; Nupplo bewahrt sie nun in
+  Sammlung und Wert, kennzeichnet den Preisstand und erneuert sie, sobald
+  der Katalogdienst einen neueren Satz liefert. Figurenpreise verfallen
+  weiterhin nach 26 Stunden.
+
+## 3.9.29 – Oktober 2026
+### Behoben
+- **Der erste erweiterte Hub-Abzug blieb am alten ETag hängen.** Nach dem
+  Wechsel auf `mit_alt=1` konnte der Hub wegen desselben ETags `304`
+  zurückgeben. Die Instanz fragt den erweiterten Abzug jetzt einmal ohne das
+  alte ETag ab; danach nutzt sie den ETag wieder wie gewohnt. So kommen auch
+  ältere Preis-Daten samt letztem Abrufdatum an, ohne den alten Preis selbst
+  anzuzeigen.
+## 3.9.28 – Oktober 2026
+### Geändert
+- **„Nur ohne Helm zu unterscheiden“ statt „Ohne Helm nicht zu
+  unterscheiden“** bei Doppelgängern, die sich nur im Kopf unter dem Helm
+  unterscheiden (z. B. sw0004a gegen sw0004). Der alte Satz sagte das
+  Gegenteil dessen, was gemeint war: Mit Helm sehen beide gleich aus.
+  Englisch: „Only distinguishable without the helmet: the head is different.“
+
+## 3.9.27 – Oktober 2026
+### Geändert
+- **Statt „Kein aktueller Preis im Preisdienst“ steht jetzt, wann der Preis
+  zuletzt geholt wurde:** „Preis zuletzt am 21.10.2026 geholt, wird bald
+  aktualisiert“, darunter wie bisher der Link zu BrickLink. Ein alter Preis
+  erscheint dabei nie, nur das Datum (BrickLinks 24-Stunden-Regel). Die
+  Instanz holt den Tagesabzug dafür mit `mit_alt=1` (Hub 1.43.0) und merkt
+  sich außerdem das Datum jedes Satzes, der hier aus der Frische fällt.
+  Ältere Hubs übergehen den Schalter, dann bleibt der bisherige Satz.
+
+## 3.9.26 – Oktober 2026
+### Neu
+- **`/api/sync/info` nennt den Namen der SE** (`name`, der Anzeigename aus
+  den Einstellungen, sonst leer). Sven wollte in den Apps sehen, mit welcher
+  Instanz sie verbunden sind (18.10.2026); bisher kannten die Geräte nur die
+  Adresse, die sie selbst eingetragen hatten. Das Feld kommt hinzu, ältere
+  Geräte lesen es einfach nicht.
+- Nupplo für Windows zeigt beim Abgleich, mit welcher SE und auf welchem Weg
+  (zu Hause direkt oder über Nupplo Connect) – siehe `windows/CHANGELOG.md`
+  0.3.4.
+
+## 3.9.25 – Oktober 2026
+### Geändert
+- **Teile- und Setdatei kommen vom Hub, nicht mehr von GitHub.** Die SE
+  war auf GitHub-Pfade eingestellt, auf denen nie eine Datei lag. Ohne
+  eigens eingestellte Adresse gab es deshalb keine Teile, keine
+  Doppelgänger und keine Setdaten. Sven wollte die Dateien nicht auf GitHub
+  haben (17.10.2026). Sie liegen jetzt wie die Preise im Hub (ab 1.41.0),
+  und die SE holt sie mit ihrem anonymen Preis-Zugang, mit ETag wie bisher.
+  Eine eigene Adresse (`FIGURTEILE_QUELLE`, `SETDATEN_QUELLE`) geht weiter
+  vor; so bleibt die Testinstanz beim Probe-Katalogdienst.
+- **Tests sprechen nie mit dem echten Hub.** Die Hub-Adresse zeigt in jedem
+  Test ins Leere, und der Preis-Zugang ist ein fester Wert. Ohne diese
+  Sperre hätte jeder Test, der die Teiledatei holt, einen Zugang auf dem
+  Live-Hub angelegt.
+
+## 3.9.24 – Oktober 2026
+Aus der Durchsicht, wie die Apps zusammenspielen (17.10.2026).
+
+### Behoben
+- **Abhaken vom iPhone kam bei Standard-Benutzern nie an.** iPhone und Mac
+  schicken beim Verbuchen die ganze Zeile eines Listen-Artikels; die SE
+  nahm von Standard-Benutzern aber nur die Verbuchen-Felder an und lehnte
+  alles mit „forbidden“ ab. Auf dem Gerät war der Artikel abgehakt, in der
+  SE nicht, und niemand erfuhr davon. Jetzt gehen unveränderte Felder
+  durch, geschrieben wird weiter nur, was verbucht werden darf. Wer einen
+  Namen oder Preis ändert, bekommt wie bisher „forbidden“.
+- **Von Hand eingetragene Doppelgänger kamen erst nach bis zu zwölf
+  Stunden an.** Die Teiledatei, die die Paare trägt, holte nur der
+  Hintergrundlauf. Jetzt kommt sie auch beim Öffnen der App (höchstens alle
+  15 Minuten, mit ETag) und auf „Jetzt holen“ mit – wie Katalog, Setnamen
+  und Setdaten. Das iPhone hatte sie nach zehn Minuten.
+- **Hub-Preise: Ein Fehler beim eigenen Gebiet ließ auch die Rückfälle
+  aus.** Der stündliche Lauf hatte ein einziges `try` um die ganze Kette.
+  Jetzt wird jedes Gebiet für sich geladen, wie schon beim Laden von Hand.
+
+### Geändert
+- **Ein Set ohne Preis wird höchstens einmal je Stunde beim Hub
+  angefragt.** Bisher ging jedes Öffnen erneut hinaus, obwohl der Hub eben
+  „vorgemerkt“ gesagt hatte. Die iOS-App wartet ebenso eine Stunde.
+- **Einkaufslisten in einer Abfrage.** `/api/lists` holte die Artikel je
+  Liste einzeln und die deutschen Namen je Liste; jetzt einmal für alle.
+
+## 3.9.23 – Oktober 2026
+### Neu
+- 🪟 **Desktop-Modus für Nupplo für Windows.** Mit `NUPPLO_DESKTOP=1`
+  legt die SE ihr eines Konto selbst an, und `/desktop/start` meldet das
+  Programmfenster mit einem Einmal-Geheimnis an (`NUPPLO_DESKTOP_GEHEIMNIS`,
+  nur von 127.0.0.1). Ohne die Variable antwortet die Adresse mit 404 –
+  auf dem NAS ändert sich nichts. **Warum:** Die Windows-App soll ohne NAS
+  laufen, und ein Anmeldebildschirm vor der eigenen Sammlung auf dem
+  eigenen Rechner wäre nur lästig.
+- 🪟 **Die Web-App weiß davon.** Am eigenen Rechner blendet sie aus, was
+  nur auf einem Server Sinn hat: das „SE“ im Logo, Passwort, Zwei-Faktor,
+  Abmelden, Benutzerverwaltung, Updates, Zugriff von außen. Abmelden ließe
+  einen vor einer Anmeldung stehen, deren Passwort niemand kennt. Beim
+  ersten Fenster startet der Einrichtungsassistent; statt „Absichern“
+  kommt dort der Schritt „Abgleich“.
+- 🪟 **Am eigenen Rechner keine Connect-Instanz.** Im Desktop-Modus legt
+  die SE keine Connect-Schlüssel an und lässt sich nicht einschalten.
+  **Warum:** Sven hat am 16.10.2026 entschieden, dass Geräte sich nur auf
+  zwei Wegen verbinden – über einen frei wählbaren eigenen Cloud-Ordner
+  oder über Connect mit einer SE.
+- 🪟 **Abgleich mit der SE zu Hause.** Am eigenen Rechner hat Nupplo immer
+  eigene Daten und gleicht sie auf Wunsch mit einer Nupplo SE ab, über
+  dieselbe Schnittstelle wie iPhone und Mac (`/api/sync`) und mit denselben
+  Regeln: Die neuere Änderung gewinnt, dieselbe Figur auf beiden Seiten
+  wird zusammengelegt (Mengen addiert), Löschungen gehen in beide
+  Richtungen. Einstellungen → Nach außen → „Abgleich“ und im Assistenten,
+  mit drei Wegen wie in allen Apps: nur dieser Rechner, eigener
+  Cloud-Ordner (kommt bald), mit meiner Nupplo SE. Angemeldet wird mit
+  Benutzer und Passwort (auch mit Zwei-Faktor-Code); gespeichert wird nur
+  das Token, nicht das Passwort. Alle zwei Minuten und auf Knopfdruck.
+  Antwortet die SE nicht direkt, geht es über Nupplo Connect, wenn das
+  Windows-Programm dafür gekoppelt ist (beim Verbinden zu Hause von selbst).
+  **Warum:** Sven am 16.10.2026: „Es sollen alle das selbe können.“ Bisher
+  zeigte Windows mit SE nur deren Oberfläche und ging ohne Verbindung gar
+  nicht. Geprüft wird gegen eine echte zweite SE im Test, nicht gegen
+  einen Nachbau.
+## 3.9.22 – Oktober 2026
+
+### Geändert
+- 📚 **Nummern zuerst im Nupplo-Katalog nachschlagen, auch mit eigenem
+  BrickLink-Schlüssel.** Bisher fragte die SE mit Schlüssel bei jeder
+  Nummer zuerst BrickLink live, selbst wenn der Katalog sie längst
+  kannte. Das kostete Abrufe vom Tageskontingent und passte nicht zu
+  iPhone und Mac, die seit heute immer zuerst den Katalog fragen. Anlass
+  war die Meldung „BrickLink kennt diese Nummer nicht“ zu sw0518 auf dem
+  iPhone. BrickLink bleibt der Rückfall für Nummern, die der Katalog
+  nicht kennt oder zu denen er kein Bild hat. Das ↻ am Bild fragt
+  weiterhin direkt BrickLink, denn dort will man ausdrücklich ein
+  frisches Bild. Preise kommen unverändert aus der eingestellten Quelle.
+
+## 3.9.21 – Oktober 2026
+
+### Behoben
+- 👯 **Teile von oben nach unten.** Unter sw0518 stand „Helm, Beine und
+  Oberkörper: anderer Aufdruck“, in der Reihenfolge der Teileliste. Jetzt
+  gilt die Reihenfolge an der Figur wie in der iOS-App: Kopfbedeckung,
+  Haare, Kopf, Hals, Oberkörper, Beine, Zubehör. Also „Helm, Oberkörper und
+  Beine“ und bei Boba Fett „Oberkörper und Beine in Hellgrau oder
+  Hellblaugrau?“.
+
+## 3.9.20 – Oktober 2026
+
+### Geändert
+- 👯 **Mehrere Teile nur anders bedruckt.** Sven verglich die Scout
+  Trooper sw0518 und sw1002: Helm, Oberkörper und Beine sind gleich und
+  gleichfarbig, nur anders bedruckt. Solche Paare trägt der
+  Katalogdienst (1.27.1) von Hand ein; die Regel selbst bleibt, wie sie
+  ist. Unter dem Treffer steht dann
+  „Helm, Oberkörper und Beine: anderer Aufdruck. Davon hängt die Nummer
+  ab.“ statt dreimal „Welcher Aufdruck auf …“.
+
+## 3.9.19 – Oktober 2026
+
+### Behoben
+- 👯 **Farbfrage auch mit BrickLinks echten Teilenummern.** Nach 3.9.18
+  stand unter sw0002 „Welche Beine und welcher Oberkörper?“. In
+  BrickLinks Listen heißen die Beine von sw0002 und sw0002a 970c09 und
+  970c86, die Oberkörper 973pb0282c01 und c03. Der Zusatz „cNN“ macht aus
+  derselben Form eine eigene Nummer, und bei den Beinen trägt der Eintrag
+  die Farbe der Hüfte (Braun gegen Rotbraun), nicht die der Beine. Der
+  Server liefert jetzt zu jedem Teil die Form ohne Zusatz und die Farbe,
+  in der man es sieht. Bei Beinen ist das die aus dem Zusatz. Die Frage
+  lautet damit „Beine und Oberkörper in Hellgrau oder Hellblaugrau?“.
+- 👯 **Gleich wie in der iOS-App.** Alte Aufdrucke mit „px“ (Helm x50px1
+  gegen x50px3 bei sw0002b) zählen als Aufdruck. Im Steckbrief stehen
+  mehrere Farbpaare mit Komma nebeneinander.
+
+## 3.9.18 – Oktober 2026
+
+### Behoben
+- 👯 **Die Prüffrage unter dem Treffer nennt den echten Unterschied.** Bei
+  Boba Fett sw0002 stand zweimal „Mit oder ohne Beine? Davon hängt die
+  Nummer ab.“ Dabei haben sw0002a und sw0002b dieselben Beine und denselben
+  Oberkörper, nur in Hellblaugrau statt Hellgrau. Die Frage nahm einfach das
+  erste abweichende Teil, sobald mehr als eine Teileart betroffen war. Jetzt
+  werden die Teile gepaart: gleiche Teilenummer in anderer Farbe ergibt
+  „Beine und Oberkörper in Hellgrau oder Hellblaugrau?“, gleiche Form mit
+  anderem Aufdruck „Welcher Aufdruck auf dem Oberkörper?“, ein anderes Teil
+  derselben Art „Welcher Kopf?“. „Mit oder ohne …?“ bleibt nur für ein Teil,
+  das eine der beiden Figuren nicht hat. Haben zwei Doppelgänger trotzdem
+  dieselbe Frage, steht die Nummer davor, damit es nicht wie ein doppelter
+  Eintrag aussieht. Im Steckbrief heißt es entsprechend „Beine und
+  Oberkörper in Hellblaugrau statt Hellgrau“.
+
+## 3.9.17 – Oktober 2026
+
+### Geändert
+- 💶 **Preise: entweder eigener Schlüssel oder Preisdienst.** Mit eigenem
+  BrickLink-Schlüssel holt Nupplo alle Preise selbst, „alle … Stunden“ nach
+  eigener Wahl (vorgegeben 24), und nimmt nie die zentralen; die eigenen
+  gehen nie zum Hub. Ohne Schlüssel kommen die Preise nur vom Preisdienst, und der
+  kennt Star Wars und Herr der Ringe. Sets ohne frischen Preis fragt Nupplo
+  beim Öffnen einzeln an; der Hub merkt sich nicht, wer gefragt hat. Die
+  Wahl „Preise holen von“ gibt es nicht mehr, `PREISQUELLE` zählt nicht mehr.
+- 🕒 **Preise aus dem Preisdienst nie älter als 26 Stunden.** BrickLinks
+  API-Bedingungen verlangen frische Preise; die Grenze steht an einer
+  Stelle. Ältere verschwinden aus Sammlung, Listen, Wert und
+  Preis-Protokoll; stattdessen steht dort „Preis bei BrickLink ansehen“.
+  Der Hintergrundjob läuft jetzt stündlich statt alle zwölf Stunden und
+  holt, was fällig ist, statt erst nach sieben Tagen. Der Preisverlauf
+  erscheint nur neben einem aktuellen Preis.
+- 🔄 **Preise vom Preisdienst stündlich nachgeladen.** Einmal am Tag kommt
+  der ganze Abzug, dazwischen jede Stunde nur, was der Katalogdienst
+  seither geholt hat. So entsteht keine Lücke zwischen zwei Abzügen.
+- 🏷 **Angebotspreise („ab“) nur mit eigenem Schlüssel.** Der Preisdienst
+  führt nur Verkäufe. Ohne Schlüssel gibt es weder den Schalter noch eine
+  leere „ab“-Zeile.
+- 📦 **Schachtel-Scanner nur noch in den mobilen Apps.** In der
+  Browser-Oberfläche gibt es weder das Anlernen noch den Schalter
+  „Gelernte Schachtel-Codes teilen“. Die Schnittstellen (`/api/cmf/…`, die
+  Code-Erkennung in `/api/scan`) bleiben für iPhone und Android.
+- 🧭 **Die Einrichtung sagt es gleich.** Schritt „Preise“ erklärt, was ohne
+  Schlüssel geht und wie man einen bekommt: bei BrickLink einen Shop
+  eröffnen (er darf leer bleiben), dann den Schlüssel beantragen.
+
+## 3.9.16 – Oktober 2026
 
 ### Neu
-- 🎄 **Vom ersten Advent bis 06.01. wird der Turm im Logo zum
-  Weihnachtsbaum.** Grüner, blauer und roter Stein werden nach oben
-  schmaler, und der gelbe wird zum Stern. Im Startbildschirm landet er
-  zuletzt, blitzt auf und leuchtet. In der Kopfleiste und bei der Anmeldung
-  steht der Baum ebenfalls. Danach ist von selbst wieder der Turm da.
-  - Der erste Advent liegt jedes Jahr woanders (27.11. bis 03.12.).
-    `theme-boot.js` rechnet ihn aus und setzt die Klasse vor dem ersten
-    Bild, damit der Startbildschirm nicht erst den Turm zeigt.
-  - Außerhalb des Startbilds ist der Baum ein Bild
-    (`icons/turm-baum.svg`). Aus einzelnen CSS-Steinen wurden in der
-    kleinen Kopfleiste unscharfe Streifen.
-  - Zum Ansehen außerhalb der Zeit: `?weihnachten=an`, zurück mit
-    `?weihnachten=auto`.
+- 📦 **Sammelfiguren-Schachteln am Code erkennen.** Ein Foto vom
+  Data-Matrix-Code auf der Schachtel genügt: Die Instanz liest ihn selbst
+  (zxing-cpp) und schlägt ihn in `cmf-codes.ndjson` des Katalogdienstes
+  nach – **bevor** Brickognize gefragt wird. Das spart Kontingent, und das
+  Foto bleibt zu Hause. Solche Fotos zählen auch nicht gegen die
+  Scan-Bremse.
+- **Unbekannte Schachtel anlernen**: Nach dem Öffnen die Figur suchen und
+  antippen (nur Sammelfiguren, `col…`). Der Code wird gemerkt und schlägt
+  künftig die Liste; er läuft nicht im Abgleich mit. Lag noch nie eine
+  Code-Liste vor, heißt es „Code-Liste nicht erreichbar, bitte später
+  nochmal scannen.“ – Anlernen dann nur über den kleinen Knopf darunter.
+  Die zuletzt geholte Liste bleibt gespeichert und hilft über Ausfälle.
+- **„Gelernte Schachtel-Codes teilen“** (Einstellungen, nur Admins),
+  voreingestellt aus. Eingeschaltet geht beim Anlernen nur Code und
+  Figurnummer an den Hub, ohne Namen.
 
-## 3.8.3 – Oktober 2026
-
-### Sicherheit
-- 🔒 **Zugriff ohne Portfreigabe: stumme Verbindungen gehen wieder zu.**
-  Ein Gerät, das sich über den Vermittler meldet, aber den verschlüsselten
-  Handschlag nicht schickt, hielt bisher seinen Platz, solange es wollte.
-  Weil der Vermittler je Instanz nur acht Geräte gleichzeitig zulässt,
-  konnte so jemand alle Plätze besetzen, und die eigenen Geräte kamen nicht
-  mehr hinein. Jetzt schließt Nupplo jede Verbindung, die nach zehn Sekunden
-  noch keinen Handschlag hat. Gekoppelte Geräte merken davon nichts, ihr
-  Handschlag dauert Millisekunden.
-
-## 3.8.2 – Oktober 2026
+## 3.9.15 – Oktober 2026
 
 ### Geändert
 - 🔒 **Der Figurenkatalog kommt verschlüsselt.** Die Beschreibungen, mit
@@ -51,12 +454,506 @@
   Grund dafür. Nach dem Update verschwinden diese Hinweise von selbst, und
   jede Beschreibung kommt aus der neuen Datei zurück. Wer die alte Adresse
   als Katalogquelle eingetragen hatte, wird still auf die neue umgelenkt.
-- 🇩🇪 **Beschreibungen werden beim Abruf eingedeutscht**, nicht nur einmal
-  beim Start. Sonst wären alle Beschreibungen, die nach dem Hinweis neu
-  kommen, englisch geblieben, und „gelber Kopf“ fände nichts mehr.
 
-Sonst ändert sich nichts – dieses Update bringt nur die neue Katalogdatei
-und ihren Schlüssel.
+### Behoben
+- 🧱 Brickmerge steht nur noch da, wo es dort einen Preis gibt; ein bloßer
+  „ansehen“-Link ohne Angebot entfällt.
+- 🇩🇪 **Deutsche Suchwörter blieben nach einem Katalogabruf nicht
+  erhalten.** Die Beschreibungen wurden nur einmal beim Start
+  eingedeutscht; der nächste Abruf schrieb den englischen Text zurück und
+  gab dabei jeder Zeile eine neue Zeit, sodass der externe Zugriff den
+  ganzen Katalog neu bekam. Jetzt wird die Datei beim Abruf genauso
+  eingedeutscht, bevor verglichen wird – Unverändertes bleibt unverändert.
+
+## 3.9.14 – Oktober 2026
+
+### Neu
+- 🧩 **Teil für Teil direkt aus der Suche.** Teile einer Figur abhaken
+  ging nur auf der Wunschliste: Figur suchen, merken, zur Wunschliste
+  wechseln, dort aufklappen. Jetzt hat das Fenster eines Suchtreffers und
+  der Steckbrief einer Figur denselben Knopf „Teil für Teil“, und mit dem
+  ersten Haken kommt die Figur auf die Wunschliste – angekündigt im Hinweis
+  über der Liste und bestätigt mit einer Meldung, denn die Sammlung ändert
+  sich nie still. Alle Haken wieder weg nimmt sie nicht von der Liste: Ein
+  Wunsch kann Notizen haben oder auf einer Einkaufsliste stehen. Wie auf der
+  Wunschliste hakt nur das Kästchen ab, ein Tipp aufs Teil öffnet BrickLink.
+- 🧍 **Vom Einzelteil zu den Figuren.** Ein unter „Einzelteil“ gefundenes
+  Teil zeigt in seinem Fenster und im Steckbrief, in welchen Figuren es
+  steckt – mit der Farbe des Treffers, aus der Teileliste des Katalogs. Ein
+  Tipp öffnet den Steckbrief der Figur und damit das Puzzle. Anlass beider
+  Punkte war die Frage, wie man eine Figur aus Einzelteilen zusammenbaut.
+
+## 3.9.13 – Oktober 2026
+
+### Geändert
+- 🔢 **Nummern an den Treffern der Mehrfacherkennung.** Jede Karte trägt die
+  Nummer ihres Rahmens im Foto, in derselben grünen Marke. Bei 21 Figuren
+  war sonst nicht zu sehen, welche Karte zu welchem Rahmen gehört. Von Hand
+  gezogene Rahmen ohne Treffer fallen weg, die übrigen behalten ihre Nummer.
+  Die automatisch gefundenen Rahmen sind in Lesereihenfolge nummeriert –
+  Zeile für Zeile von oben, in der Zeile von links; von Hand gezogene in der
+  Reihenfolge, in der man sie gezogen hat.
+- ‹ › **Die Setbilder-Reihe lässt sich blättern.** Passten die Bilder nicht
+  in die Breite, war die Reihe am Desktop rechts abgeschnitten. Jetzt gibt es
+  Pfeile an den Enden (nur, wo es weitergeht), das Mausrad blättert quer, und
+  beim Blättern in der Großansicht wandert die Reihe mit.
+- 🔎 Set-Treffer der Suche tragen Jahr und Teilezahl („2026 · 6.130 Teile“):
+  Zwei Sets mit gleichem deutschem Namen sahen sonst gleich aus.
+- × **Suchfelder leeren.** Auch die Katalogsuche und die Themensuche haben
+  jetzt das ×; in allen Suchfeldern leert Esc das Feld samt Ergebnissen.
+- 🔗 **Teil für Teil: Ein Tipp aufs Teil öffnet BrickLink**, mit der Farbe
+  vorgewählt. Abgehakt wird nur noch über das Kästchen – vorher schaltete
+  jeder Tipp auf Bild oder Namen den Haken um.
+- 👯 „Leicht zu verwechseln“ beschreibt jetzt die genannte Figur: „Ohne
+  Entfernungsmesser“, „Zusätzlich mit …“, „Mit … statt …“. Vorher stand unter
+  sw1422 „Hier zusätzlich: Entfernungsmesser“ – gemeint war die offene Figur.
+  Darunter ein Streifen mit den unterscheidenden Teilen: links die der
+  offenen Figur mit ihrer Nummer, „↔“, rechts die des Doppelgängers; fehlt
+  auf einer Seite ein Teil, steht dort „ohne“. Ein Tipp aufs Teil zeigt es
+  groß, mit Name, Farbe, Figur und dem Weg zu BrickLink. Der Satz darüber
+  ist kurz geworden („Mit anderem Kopf“, „Mit Oberkörper (Weiß) statt
+  (Beige)“) – den Rest zeigen die Bilder. Dieselbe Figur in anderer
+  Schreibweise erscheint nur einmal.
+- 👯 **Prüffrage unter dem Treffer kurz und mit Bildern.** Statt zweier
+  langer Teilenamen steht dort „Welcher Kopf? Davon hängt die Nummer ab.“
+  und derselbe Teilestreifen; ein Tipp auf eine der Nummern übernimmt genau
+  diese Figur.
+- 🔡 Figurnummern der Teiledatei werden ohne Groß/klein verglichen und klein
+  gespeichert (der Katalogdienst schreibt sie seit 1.22.3 klein). Eine
+  Sammlung mit „LLP002“ findet ihre Teile und Doppelgänger weiter.
+- 🖼 **Setbilder von Brickmerge nur auf Wunsch, direkt von dort.** Sven:
+  „Die Bilder bitte nicht mit ziehen, diese sollen von dort aus geöffnet
+  werden. Aber auch abschaltbar bitte.“ Bis 3.9.12 holte der eigene Server
+  Brickmerges Setbilder und behielt eine Kopie. Jetzt lädt der Browser sie
+  direkt bei brickmerge.de (ohne Absenderadresse), der Server hat keinen Weg
+  mehr dorthin. Neuer Schalter unter **Mehr → Angebotspreise**: „Setbilder
+  von Brickmerge zeigen“, voreingestellt aus. Aus heißt: keine Bilderreihe,
+  keine Anfrage bei Brickmerge. Die Bildliste kommt weiter mit der Setdatei
+  des Katalogdienstes – nur die Namen, keine Bilder.
+
+## 3.9.12 – Oktober 2026
+
+### Geändert
+- 🧱 **Setdaten kommen mit dem Katalog.** Sven: „wobei ich gedacht hätte,
+  die setdaten ziehen wir uns selber und diese werden im katalog
+  hinterlegt.“ Bis 3.9.11 holte jede Instanz beim Öffnen eines
+  Set-Steckbriefs die Brickmerge-Seite für Erscheinung, EOL, UVP und
+  Bilder. Jetzt fragt der Katalogdienst Brickmerge im Takt (ab 1.22.0) und
+  liefert alles in der Setdatei, auch die Bildliste; der Steckbrief liest
+  nur noch `set_daten`. Beim Öffnen geht nichts mehr nach draußen – außer
+  der Frage nach dem Angebotspreis, wenn „Angebotspreise von Brickmerge
+  zeigen“ eingeschaltet ist. Ausgeschaltet antwortet `/api/brickmerge` nur
+  mit dem Link, ohne Abruf.
+
+## 3.9.11 – Oktober 2026
+
+### Geändert
+- 📚 **Der Katalog-Abzug sagt, was er wirklich bringt.** Die Karte schrieb
+  noch „Namen stehen nicht darin. Die schlägt Nupplo mit deinem eigenen
+  BrickLink-Zugang nach“ und bot jedem „Katalogdatei einlesen“ und
+  „Kategorien holen“ an – auch ohne Zugang, wo „Kategorien holen“ nur einen
+  Fehler bringt. Dabei kommen seit 3.9.x die Teile jeder Figur, Sets mit
+  Name, Thema, Jahr, Teilen und Figuren und deutsche Setnamen aus dem
+  Katalog selbst. Jetzt zählt die Karte unter „Mitgeliefert“, was davon
+  angekommen ist. Die Katalogdatei steht nur noch da, solange Figurennamen
+  fehlen – die dürfen wir nicht mitliefern –, und „Kategorien holen“ nur
+  mit eigenem Zugang und nur, wenn ein Set aus BrickLinks `Sets.xml` sein
+  Thema noch nicht kennt.
+- 🙈 **Einstellungen zeigen nur, was im Zustand etwas tut.** „Nur mit
+  zweitem Faktor“ erscheint erst bei eingeschaltetem Zugriff ohne
+  Portfreigabe, Modell und Test der lokalen KI erst mit Adresse, der
+  Cloudflare-Block erst mit Adresse und Token (mit Platzhaltern kopiert,
+  startet der Tunnel nicht). Angebotspreise und Preis-Protokoll brauchen
+  eine Preisquelle; ohne sagt die Karte, dass erst eine fehlt. Im
+  Preisdienst-Betrieb steht beim eigenen BrickLink-Zugang, wofür er noch
+  gut ist, damit er nicht wie ein fehlendes Pflichtfeld aussieht.
+  Anlass: „bei den Einstellungen würde ich auch abhängig von den
+  Einstellungen einige Felder ausblenden.“
+
+## 3.9.10 – Oktober 2026
+
+### Geändert
+- 🔎 **Suchtreffer zeigen den Set-Steckbrief.** „bei der suche sollten schon
+  ein bisschen mehr daten im steckbrief stehen“ – ein Set aus „Manuell
+  erfassen“ zeigte nur Name, Nummer und Jahr. Jetzt stehen dort dieselben
+  leisen Eckdaten wie im Steckbrief (Teile, Figuren, erschienen, EOL,
+  Themenwelt), der deutsche Name, die Bilderreihe mit Großansicht zum
+  Wischen und die UVP – mit eingeschaltetem Schalter auch der
+  Brickmerge-Preis. Es ist derselbe Baustein, damit beide gleich bleiben.
+
+## 3.9.9 – Oktober 2026
+
+### Geändert
+- 🏷 **Brickmerge-Angebotspreise nur auf Wunsch.** „die angebotspreise von
+  brickmerge sollten, genauso wie die ab-Preise von Bricklink optional
+  sein“ (Sven). Unter **Mehr → Angebotspreise** steht jetzt gleich unter
+  BrickLinks Schalter „Angebotspreise von Brickmerge zeigen“, voreingestellt
+  aus wie dort. Ausgeschaltet fehlt die Zeile „Bei Brickmerge: ab …“ auf dem
+  Blatt Preise, und der Server lässt den Preis schon aus der Antwort weg.
+  Erscheinung, EOL, UVP und Setbilder holt der Steckbrief weiter von
+  Brickmerge.
+
+## 3.9.8 – Oktober 2026
+
+### Geändert
+- 🧱 **Set-Steckbrief ruhiger.** Sven: „die PreiseUVP und brickmerge, würde
+  ich in den entsprechenden reiter mit rein machen. außerdem sind die
+  eckdaten irgendwie ganz schön zu präsent. außerdem kann ich die Bilder
+  nicht durchswipen“. Drei Änderungen:
+  - Die Eckdaten (Teile, Figuren, erschienen, EOL) stehen nicht mehr als
+    vier Kacheln so groß wie Bezahlt/Wert/Gewinn da, sondern als kleine,
+    gedämpfte Zeilen unter der Nummer. Die Themenwelt nur noch, wenn ein
+    Unterthema dazukommt – das Thema steht schon im Kopf.
+  - UVP und „Bei Brickmerge: ab … ↗“ stehen auf dem Blatt **Preise**. Sets
+    haben das Blatt jetzt immer, auch ohne eigenen BrickLink-Zugang.
+  - Ein Tipp auf ein Bild der Reihe oder auf das große Bild öffnet die
+    Großansicht mit allen Setbildern zum Wischen. Vorher tauschte der Tipp
+    nur das Bild im Steckbrief, und die Großansicht kannte Brickmerges
+    Bilder nicht.
+- 🇩🇪 **Deutscher Setname im Steckbrief.** Die Suche fand
+  „Supersternzerstörer“ schon über die deutschen Setnamen, der Steckbrief
+  zeigte aber weiter „Executor Super Star Destroyer“. Jetzt steht dort der
+  deutsche Name, wo der Katalog einen kennt; der englische erscheint beim
+  Draufzeigen. In der englischen Oberfläche bleibt es beim englischen.
+
+## 3.9.7 – Oktober 2026
+
+### Geändert
+- ⚡ 3.9.7: Geschwindigkeit und Stabilität aus 3.8.2 übernommen.
+
+### Behoben
+- 👯 **Die Prüffrage zu ähnlichen Figuren steht auch unter den Treffern
+  von „Manuell erfassen“.** Bisher nur unter den Scan-Treffern – wer eine
+  Nummer eintippt, verwechselt genauso.
+- 💶 Fehlt einem Treffer der Preis, nennt der Hinweis die richtige Quelle:
+  „noch kein Preis im Preisdienst“ statt „keine Preisdaten bei BrickLink“,
+  wenn die Preise vom Hub kommen – in der Trefferliste und im Steckbrief.
+- 🔀 **Treffer unter einem anderen Typ.** „Supersternzerstörer“ fand bei
+  „Minifigur“ (der Vorgabe) nichts – das Set kam erst nach dem Umstellen auf
+  „Set“. Bleibt der gewählte Typ leer, stehen jetzt die Treffer der anderen
+  Typen da („Als Set gefunden:“), auch für eingetippte Nummern; Übernehmen
+  stellt den Typ mit um.
+- 🇩🇪 **Deutsche Setnamen in Sammlung, Wunschliste und Listen.** Gibt es zu
+  einem Set einen deutschen Namen, steht er dort (bei deutscher Oberfläche).
+  Nur zur Anzeige – der gespeicherte Name bleibt, und die Suche in der
+  Sammlung findet beide.
+- ✏️ Der Preisdienst-Text in den Einstellungen verspricht keine feste
+  Häufigkeit mehr („holt regelmäßig“ statt „einmal am Tag“).
+- ↻ Das Auffrischen der Preise gibt es nur noch mit eigenem BrickLink-Zugang –
+  mit dem Preisdienst tat es nichts. Bei Sets lag es außerdem auf der UVP;
+  dort steht es jetzt in einer eigenen Zeile über den Durchschnittspreisen.
+
+## 3.9.6 – Oktober 2026
+
+### Neu
+- 🖼️ **Weitere Setbilder von Brickmerge im Steckbrief.** „brickmerge hat
+  auch die Bilder der sets. könnte man diese auch anzeigen lassen?“ – Unter
+  dem großen Bild steht jetzt eine Reihe mit Schachtel und Ansichten; ein
+  Tipp zeigt das Bild groß. Die Adressen kommen mit dem Abruf der Setseite,
+  der beim Öffnen ohnehin läuft. **Das Hauptbild bleibt Rebrickables**: Es
+  steht schon in der Sammlung und kommt ohne Abruf; Brickmerges erstes Bild
+  ist dasselbe Produktfoto und springt nur ein, wo ein Set keins hat. Geholt
+  werden die Bilder wie alle anderen vom eigenen Server und dort behalten,
+  der Browser fragt nie bei Brickmerge. Seiten, die heute schon ohne Bilder
+  gemerkt waren, werden einmal neu geholt.
+
+## 3.9.5 – Oktober 2026
+
+### Neu
+- ⭐ **„Exklusiv“ bei enthaltenen Figuren.** Unter „👥 Enthaltene Figuren“
+  steht jetzt an jeder Figur, die es nur in diesem Set gibt, **Exklusiv**
+  – Sven wollte das auf einen Blick sehen. Gezählt wird über die Setdatei,
+  nach BrickLink-Nummer, wo die Teiledatei eine eindeutige kennt – so passt
+  die Markierung auch zu Inhalten, die von BrickLink oder aus der Sammlung
+  kommen. Eine Neuauflage (75192-2) ist kein zweites Set.
+  Rebrickable zählt mitunter anders als Händlerseiten (75192: drei statt
+  zwei exklusive).
+
+## 3.9.4 – Oktober 2026
+
+### Neu
+- 💶 **Preis, Erscheinung und EOL von Brickmerge im Set-Steckbrief.**
+  Erscheinungsmonat und Auslaufdatum fehlten bei den meisten Sets, denn die
+  Setdatei kennt nur das Jahr, und für Brickset hätte jede Instanz einen
+  eigenen Schlüssel gebraucht – „von den keys wollten wir ja weg“. Jetzt
+  holt der Server beim Öffnen des Steckbriefs die Setseite bei Brickmerge
+  und zeigt daraus Erscheinung, EOL (geschätzt mit „≈“), UVP und eine Zeile
+  „Preis: ab … bei Brickmerge ↗“, die auf die Seite führt. Nur beim Öffnen,
+  nie im Hintergrund, je Set einmal am Tag; schlägt der Abruf fehl, steht
+  still nur der Link da. Was Brickmerge weiß, geht der Setdatei vor: Die
+  Seite ist von heute.
+
+## 3.9.3 – Oktober 2026
+
+### Neu
+- 🧱 **Teile, Figuren, Jahr und Themenwelt im Set-Steckbrief.** Bisher
+  stand bei einem Set nur Nummer und Jahr in der Unterzeile; wie viele
+  Teile es hat, sagte Nupplo nirgends, und das Thema kam nur mit eigenem
+  BrickLink-Zugang. Jetzt stehen oben im Steckbrief und im Katalog-Fenster
+  drei Kacheln – Teile, Figuren, Erschienen – und darunter die Themenwelt
+  mit Unterthema („Star Wars · Ultimate Collector Series“). Die Angaben
+  stammen aus Rebrickables freien Downloads; der Katalogdienst legt sie als
+  `katalog/setdaten.ndjson` neben den Abzug, die Instanz holt sie mit ihm,
+  ohne Schlüssel und ohne BrickLink. Woher, lässt sich mit
+  `SETDATEN_QUELLE` umstellen. In der Datei stehen auch die Figuren je Set (mit
+  Rebrickable-Nummern) – Grundlage dafür, dass „Enthaltene Figuren“ ohne
+  BrickLink-Schlüssel geht.
+- 👥 **„Enthaltene Figuren“ aus der Setdatei.** Ist kein Inhalt gespeichert
+  (oder nur ein leerer), kommen die Figuren jetzt aus der Setdatei, auch
+  ohne BrickLink-Zugang und ohne Preisdienst; der Knopf steht deshalb bei
+  jedem Set. 75455-1 zeigte keine Figur, weil BrickLink Boba Fett erst
+  Wochen nach dem Erscheinen nachtrug – weiß die Setdatei mehr als
+  BrickLink, gilt sie. Rebrickable-Nummern werden über die Teiledatei zu
+  BrickLink-Nummern; wo das nicht eindeutig geht, steht die Figur mit
+  Rebrickables Namen und Bild da und wird **nicht** gespeichert, sonst
+  stimmten „👥 3/4“ und die fehlenden Set-Figuren nicht mehr. Nach jedem
+  Holen der Setdatei füllt die Instanz leere Inhalte eigener Sets nach.
+- 📅 **Erscheinung, EOL und UVP im Set-Steckbrief.** „Erschienen“ zeigt
+  den Monat („10/2017“) statt nur des Jahres, daneben steht **EOL** mit dem
+  Monat oder Jahr, in dem das Set ausgelaufen ist, oder **Läuft aus**, wenn
+  das Ende angekündigt ist; ein geschätztes Ende steht mit „≈“ da. Unter der
+  Themenwelt steht die **UVP**. Alles kommt mit der Setdatei vom
+  Katalogdienst; die Instanz fragt dafür keinen Händler und keine
+  Schnittstelle. Wo die Quelle nichts weiß – bei Sets vor etwa 2010 oft –,
+  bleibt es beim Jahr und ohne EOL: Kein Datum heißt nicht „noch
+  erhältlich“.
+- 🔁 **Junge Sets werden nachgeprüft.** 75455-1 wurde zum Erscheinen
+  gekauft und erfasst, als BrickLink Boba Fett noch nicht führte; der leere
+  Inhalt blieb zwei Monate stehen, denn geholt wurde er nur einmal. Jetzt
+  gleicht jede Nacht die Setdatei die Inhalte eigener Sets ab, und mit
+  eigenem BrickLink-Zugang sieht die Instanz bei Sets aus diesem und dem
+  letzten Jahr alle zwei Wochen nach, höchstens zehn je Nacht. Nie zu
+  weniger Figuren.
+- 👥 **Neue Figur zu einem eigenen Set? Die App fragt.** Kommt so eine Figur
+  dazu, fragt Nupplo beim nächsten Öffnen dasselbe wie beim Erfassen eines
+  Sets: welche davon dabei sind, in welchem Zustand. Je Set einmal, ob
+  übernommen oder nicht. Ein erster Entwurf hätte nur den Set-Inhalt still
+  ergänzt; „so still bitte nicht“ – wer das Set hat, hat meist auch die
+  Figur, und sie fehlte dann ohne Hinweis in der Sammlung.
+- 📚 **Sets im Katalog ohne Sets.xml.** Der nächtliche Abzug brachte nur
+  Figuren; Sets kamen nur in den Katalog, wenn jemand BrickLinks
+  `Sets.xml` hochlud. Jetzt kommen sie mit der Setdatei, rund 22.000 mit
+  Teilen, nach Rebrickables Thema geordnet. Was schon aus der Sets.xml da
+  ist, bleibt unverändert.
+
+## 3.9.2 – Oktober 2026
+
+### Neu
+- 🌍 **Land in der Tauschbörse.** Unter *Mein Profil* lässt sich das Land
+  eintragen; es steht dann mit Fahne an allen eigenen Angeboten und im
+  Profil. Unter *🔎 Angebote* filtert eine Auswahl nach Land oder
+  Kontinent. Bisher war nicht zu sehen, woher ein Angebot kommt – wer Porto
+  und Zoll sparen will, musste erst nachfragen. Das Land gilt je Mitglied,
+  nicht je Angebot, weil alles von derselben Adresse verschickt wird; der
+  Kontinent wird daraus abgeleitet. Steht im Preisgebiet ein Land, ist es
+  im Profil vorgewählt, geht aber erst mit „Speichern“ zum Hub. Braucht
+  Hub 1.30.0; ein älterer Hub zeigt die Angebote wie bisher, nur ohne Land.
+  Schritte des Einrichtungsplaners ohne Landfeld schicken das Land nicht
+  mit, damit sie ein eingetragenes nicht wieder löschen.
+- 🔎 **Sets unter ihrem deutschen Namen finden.** „Supersternzerstörer
+  Executor“ findet jetzt das Set 75457, das bei BrickLink „Executor Super
+  Star Destroyer - UCS“ heißt. Die Namen druckt LEGO auf Schachtel und
+  Bauanleitungsseite; der Katalogdienst holt sie dort und legt sie als
+  `katalog/setnamen.ndjson` neben den Abzug, die Instanz holt sie mit ihm.
+  Gesucht wird mit dem Getippten selbst, lange Wörter auch mittendrin
+  („Sternzerstörer“). Bis die Datei veröffentlicht ist, bleibt alles wie
+  bisher. Woher die Datei kommt, lässt sich mit `SETNAMEN_QUELLE` umstellen
+  (etwa auf einen Katalogdienst im eigenen Netz).
+- 🔎 **Einzelteile auf Deutsch und mit Farbe finden.** „weißer
+  Stormtrooper Helm mit gelb Aufdruck“ fand unter „Einzelteil“ nichts: Die
+  Suche fragte nur Rebrickable, und dort haben Teile englische Namen ohne
+  Farbe, sodass das übersetzte „white“ jeden Treffer verhinderte. Jetzt
+  durchsucht die Instanz zuerst die Teilelisten der Figuren (aus 3.9.0),
+  die zu jedem Teil die Farbe kennen. Eine genannte Farbe holt Teile in
+  dieser Farbe nach oben, passt aber auch auf den Teilenamen („Helmet with
+  White Visor“); „Aufdruck“ lässt nur bedruckte Teile übrig. Die Farbe
+  steht im Namen des Treffers, weil die Sammlung ein Teil nur nach Nummer
+  und Zustand zusammenfasst – zwei Farben desselben Teils landeten sonst in
+  einer Zeile. Ohne Teileliste bleibt es bei Rebrickable.
+
+### Behoben
+- 🔢 **Eine getippte Nummer findet die Figur.** Im manuellen Erfassen fand
+  „sw1422“ nichts, weil die Suche nur Namen und Farben vergleicht. Jetzt
+  steht eine Figuren-, Set- oder Teilenummer aus dem eigenen Katalog als
+  erster Treffer oben, Sets auch ohne „-1“.
+- 🔢 **Nummern nachschlagen ohne eigenen BrickLink-Zugang.** Ohne Schlüssel
+  kam beim Nachschlagen einer Nummer (Bild neu holen, Live-Scanner) ein
+  Fehler. Jetzt antwortet der eigene Katalog mit Name und Bild – Figuren aus
+  dem Abzug, Sets aus der Setdatei. Nur eine wirklich unbekannte Nummer
+  meldet „nicht gefunden“.
+- 👥 **„Enthaltene Figuren anzeigen“ geht ohne eigenen BrickLink-Zugang.**
+  Der Knopf meldete einen Fehler, sobald keine BrickLink-Schlüssel
+  eingetragen waren – auch wenn die Figuren des Sets längst gespeichert
+  waren. Jetzt zählt der gespeicherte Inhalt; ist ein Set noch unbekannt,
+  steht dort ein Satz statt eines Fehlers. Ein leer gespeicherter Inhalt
+  zählt dabei als unbekannt, weil BrickLink die Figuren neuer Sets oft erst
+  später führt. Ist BrickLink gestört, kommt ebenfalls der gespeicherte
+  Stand.
+- 🔎 **Zusammengesetzte Wörter bleiben ein Suchbegriff.** „Kampfdroide“
+  wurde zu zwei getrennten Suchen, `battle` und `droid`, und fand jeden
+  Droiden; „Supersternenzerstörer“ fand jeden Sternzerstörer statt des
+  einen. Die Hälften eines zerlegten Worts stehen jetzt zusammen in einer
+  Suche (`battle droid`), der hintere Teil bleibt als Ausweichfassung.
+  Anlass war die Frage, wie man „Supersternzerstörer Executor“ findet, das
+  bei BrickLink „Executor Super Star Destroyer“ heißt.
+- 🔎 **Wörter aus deutschen Setnamen.** „Hauptquartier“ fand über das
+  Wortende „-tier“ Tiere, „Abfangjäger“ fand Jäger, und „Imperialer“ blieb
+  unübersetzt stehen, sodass „Imperialer Sternzerstörer“ nichts fand. Dazu
+  kamen Läufer, Basis, Schlachtschiff, Erweiterung und Modulgebäude.
+
+## 3.9.1 – Oktober 2026
+
+### Geändert
+- 💶 **Alles zu Preisen auf einer Karte.** Unter *Mehr → Preise* stehen jetzt
+  Quelle, Gebiet, Währung und der eigene BrickLink-Zugang zum Aufklappen.
+  Bisher steckte der Schalter für den Preisdienst mitten im Preisgebiet, und
+  die BrickLink-Schlüssel standen zwei Karten weiter bei „API-Schlüssel“.
+  Beide Wege bleiben wählbar: Preisdienst ohne Schlüssel oder eigener
+  Zugang. Die Karte „API-Schlüssel“ heißt jetzt *Katalogsuche* und hat nur
+  noch den Rebrickable-Schlüssel.
+- 🧭 **Die Ersteinrichtung fragt, woher die Preise kommen sollen** –
+  Preisdienst, eigener BrickLink-Zugang oder erst mal keine. Vorher verlangte
+  sie vier BrickLink-Werte, als ginge es ohne nicht. Vorausgewählt ist
+  nichts, weil der Preisdienst ins Netz geht.
+- ✂️ **Kürzere Texte in den Einstellungen.** Jede Karte sagt in einem Satz,
+  was sie tut, und höchstens in einem weiteren, was man wissen muss. Die
+  Begründungen stehen im Handbuch.
+- 🔗 Jedipedia und Bauanleitungen stehen zusammen unter *Verweise nach
+  draußen*. Der eigene Cloudflare-Tunnel heißt so und verweist auf den
+  einfacheren *Zugriff ohne Portfreigabe*.
+- 🐢 **Der schonende Bildmodus steht jetzt unter „Für dich“.** Er lag in der
+  Fehlerkarte, und die sehen nur Admins – dabei gilt er je Benutzer und soll
+  gerade denen helfen, deren Tab beim Scannen abstürzt.
+- 🔧 `PREISQUELLE=hub` in der docker-compose schaltet den Preisdienst als
+  Startwert ein, wie die Schlüssel. Eine Wahl in der App hat Vorrang; der
+  Schalter speichert dafür „bricklink“ ausdrücklich statt leer.
+- ✅ „Verbindung testen“ prüft auch den Preisdienst, wenn er gewählt ist.
+
+### Behoben
+- **Kontaktadresse nur mit eigenem BrickLink-Zugang.** Sie verlangen nur
+  BrickLinks API-Bedingungen, gefragt wurde aber jeder.
+- **Der BrickLink-Pflichthinweis stand auch ohne Schlüssel da.** „This
+  application uses the BrickLink API“ hing an „Preise möglich“, und das ist
+  mit dem Preisdienst auch ohne Schlüssel wahr. Jetzt hängt er am eigenen
+  Zugang.
+
+## 3.9.0 – Oktober 2026
+
+### Neu
+- 👯 **Leicht zu verwechseln.** Der Steckbrief einer Figur nennt Figuren,
+  die sich nur in einem Teil von ihr unterscheiden, und welches Teil das
+  ist. Anlass war die Frage, ob Nupplo sagen kann, dass sw1422 und sw1423
+  denselben Kopf, Torso und dieselben Beine haben und nur der
+  Entfernungsmesser am Helm sie trennt – aus den eigenen Daten ging das
+  bisher nicht hervor. Unterscheidet zwei Figuren nur der Kopf und tragen
+  beide einen Helm, sagt der Steckbrief, dass man den Helm abnehmen muss.
+- 🧱 **Teil für Teil.** Auf der Wunschliste lassen sich die Teile einer
+  Figur abhaken, die man schon hat. Die Karte zeigt dann „Im Bau 2/4“. Die
+  Häkchen stehen in einer neuen Spalte am Wunsch (`teile_da`) und gehen
+  damit ohne Änderung am Protokoll über den Abgleich an die iOS-App.
+- 🔎 **Erst prüfen, dann übernehmen.** Hat ein Scan-Treffer eine fast
+  gleiche Figur, steht unter ihm die Frage, die sie trennt: „Mit
+  Entfernungsmesser? Dann sw1423, sonst sw1422." Wer
+  fotografiert, übernimmt meist direkt aus der Trefferliste und sah den
+  Hinweis im Steckbrief nie. Gefragt wird nur die Datei, nicht BrickLink.
+  Die Teile heißen dort deutsch („Entfernungsmesser (Hellblaugrau)“), wo
+  die Datei es mitbringt; nur wenn beide Seiten dann gleich hießen (zwei
+  verschiedene Helme), bleibt BrickLinks englischer Name.
+
+- 💶 **Preise aus dem Nupplo-Hub.** Unter Mehr → Preisgebiet lässt sich
+  als Preisquelle der Hub wählen statt des eigenen BrickLink-Schlüssels.
+  Die Instanz holt dann regelmäßig den ganzen Preisabzug ihres Gebiets
+  und schlägt nur noch bei sich nach – welche Figuren in der Sammlung
+  liegen, erfährt der Hub dabei nicht. Die Preise sammelt der Katalogdienst
+  für alle; umgerechnet wird mit den EZB-Kursen aus dem Abzug. Was der Hub
+  noch nicht kennt, bleibt ohne Preis, statt mit null Euro dazustehen.
+  Voreingestellt bleibt BrickLink.
+
+### Geändert
+- 🧩 **Teile einer Figur ohne BrickLink-Schlüssel.** Teile und
+  Doppelgänger kommen aus einer Datei des Katalogdienstes
+  (`figurteile.ndjson`, aus BrickLinks Teilelisten, einmal für alle
+  Instanzen geholt; Rebrickable steuert die Art der Teile bei). Die Instanz holt sie wie den Katalog, nur bei
+  Änderung (ETag). Solange es sie nicht gibt, bleibt BrickLink der Weg.
+  Die Adresse lässt sich mit `FIGURTEILE_QUELLE` umstellen, für die
+  Testinstanz auf den Katalogdienst im LAN.
+
+## 3.8.2 – Oktober 2026
+
+Eine Runde Geschwindigkeit und Stabilität, vor allem für Instanzen auf
+kleinen NAS-Geräten.
+
+### Behoben
+- ⚡ **Die Themenauswahl im Katalog öffnet in einem Bruchteil der Zeit.**
+  Der Kategoriebaum galt nur dann als geladen, wenn er nicht leer war. Auf
+  den meisten Instanzen hat ihn nie jemand geholt – also las die Instanz ihn
+  für jede Figur mit Ziffernnummer neu, rund 1.280-mal je Aufruf. Gemessen
+  mit dem vollen Katalog: 1,2 s vorher, 0,15 s jetzt; auf dem NAS waren es
+  mehrere Sekunden bei jedem Öffnen des Katalogs.
+  Danach blieben auf dem NAS noch 0,8 s, fast alles im Zuordnen von
+  Nummer zu Thema, das bei jedem Öffnen für alle 19.000 Figuren neu lief,
+  obwohl sich das Ergebnis nie ändert. Die Instanz merkt es sich jetzt
+  (gemessen 110 ms → 36 ms). Nach dem Holen des Kategoriebaums und nach dem
+  Einspielen einer Sicherung rechnet sie neu – sonst hätte ein
+  zurückgespielter Tagesstand bis zum Neustart die Themen des alten Baums
+  gezeigt.
+- ⏳ **Der Import der BrickLink-Katalogdatei hält die Instanz nicht mehr
+  an.** Er lief direkt in der Ereignisschleife des Servers; solange er die
+  bis zu 40 MB einlas, bekam niemand eine Antwort – keine Seite, kein Bild,
+  kein Nupplo Connect. Jetzt läuft er nebenher. Dasselbe für das Merken des
+  externen Zugriffs, das alle paar Minuten in die Datenbank schreibt.
+- 🖼️ **Viele neue Katalogbilder auf einmal legen die Instanz nicht mehr
+  lahm.** Jedes fehlende Bild wurde ohne Obergrenze geholt, bis zu 41 s
+  lang; eine Seite mit 60 neuen Figuren belegte damit alle Plätze des
+  Servers, und jede andere Anfrage wartete mit. Jetzt holt die Instanz
+  höchstens vier gleichzeitig, die übrigen warten, ohne etwas zu blockieren.
+  Die Verbindung zu den Bildservern wird wiederverwendet, und wer gar nicht
+  antwortet, hält nach 5 s nicht länger auf.
+- 🖼️ **Gelegentlich Platzhalter statt Bild.** Holten zwei Anfragen
+  gleichzeitig dasselbe Bild – etwa beim Erfassen und in der Liste –,
+  schrieben beide in dieselbe Zwischendatei, und eine bekam den
+  Platzhalter.
+- 📱 **Der Offline-Speicher auf dem Telefon wächst nicht mehr endlos.**
+  Die App legte jedes angezeigte Bild und jede ihrer Fassungen dort ab und
+  löschte nie etwas – nach einigen Updates lag sie mehrfach im Speicher,
+  und beim Blättern wurde jedes Vorschaubild jedes Mal neu geschrieben.
+  Jetzt bleibt nur die App selbst darin, in der aktuellen Fassung; Bilder
+  hält der Browser wie gehabt ein Jahr lang vor. Der alte Speicher wird
+  beim ersten Start von 3.8.2 geleert. Ohne Netz startet die App wie
+  bisher.
+- 📜 **Blättern im ganzen Katalog ohne Themenwahl geht schneller.** Jede
+  Seite mit 60 Einträgen lud bisher alle 19.000 Zeilen und schnitt danach
+  zurecht; jetzt liefert die Datenbank nur die Seite (gemessen 77 ms →
+  12 ms je Seite). Mit Thema oder Filter bleibt es, wie es war – die Listen
+  sind dort kurz.
+- 🗜️ **Weniger Rechenzeit fürs Packen der Antworten.** Stufe 6 statt 9:
+  bei `app.js` halb so viel CPU für praktisch dieselbe Größe.
+- 🔄 **Gekoppelte Geräte laden nach dem nächtlichen Katalog-Abzug nicht
+  mehr den ganzen Katalog neu.** Jeder Abzug gab allen 19.000 Zeilen eine
+  neue Zeit, auch den unveränderten – und der Abgleich für den externen
+  Zugriff liefert nach Zeit. Jetzt bekommen nur geänderte Zeilen eine neue
+  Zeit, und die Instanz schreibt dabei nicht mehr Megabytes ohne Not.
+  Namen, die der Namenslauf über BrickLink findet, bekommen dafür jetzt
+  selbst eine neue Zeit – bisher kamen sie nur über den Abzug mit.
+- 🔤 **Die Schrift kommt beim ersten Besuch einmal statt dreimal.** Die
+  Nunito ist eine variable Schrift; dieselbe Datei stand unter drei Namen
+  für drei Stärken in der Liste, und der Browser lud sie dreimal.
+
+### Geändert
+- 🗄️ **Die Datenbank läuft im WAL-Modus.** Bisher hielt jeder
+  Schreibvorgang – Katalog-Abzug, Namenslauf, Preise – alle lesenden
+  Anfragen auf, und bei großen Schreibvorgängen kam „database is locked“.
+  Jetzt lesen Anfragen weiter, während geschrieben wird, und ein kleiner
+  Commit kostet nicht mehr mehrere Plattenzugriffe (gemessen 0,83 ms →
+  0,01 ms, auf einer NAS-Festplatte 10–30 ms je Commit gespart). Neben
+  `brickfolio.db` liegen dafür `brickfolio.db-wal` und `-shm`.
+  - `update.sh` sichert die WAL-Datei mit; vor dem Update aus der App wird
+    sie in die Datenbank zurückgeschrieben – die `update.sh` älterer
+    Stände kopiert nur `brickfolio.db`.
+  - Die Tagessicherungen bleiben einzelne Dateien.
+  - Wer `brickfolio.db` von Hand zurückkopiert: Container stoppen und
+    `-wal`/`-shm` daneben vorher löschen (Handbuch, „Login klappt nicht
+    mehr“).
 
 ## 3.8.1 – Oktober 2026
 

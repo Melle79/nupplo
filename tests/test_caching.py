@@ -24,6 +24,16 @@ def test_startpage_carries_the_current_version(client):
     assert f"/static/style.css?v={core.APP_VERSION}" in html
 
 
+def test_marke_aendert_sich_mit_der_oberflaeche(client, monkeypatch):
+    """Windows 0.6.0 brachte eine neue Oberfläche mit derselben SE-Version
+    wie 0.5.4; WebView2 behielt die alte app.js (VM, 23.11.2026)."""
+    vorher = main._dateimarke()
+    assert vorher.startswith(core.APP_VERSION + "-")
+    monkeypatch.setattr(main, "_dateien_pruefsumme", lambda: "abcdef12")
+    assert main._dateimarke() == core.APP_VERSION + "-abcdef12" != vorher
+    assert f"/static/app.js?v={core.APP_VERSION}-abcdef12" in client.get("/").text
+
+
 def test_anmeldeseite_zeigt_die_version(client):
     """Damit man sie beim Melden eines Fehlers nicht suchen muss."""
     html = client.get("/").text

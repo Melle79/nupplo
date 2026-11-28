@@ -317,6 +317,27 @@ def test_standard_darf_listen_nur_verbuchen(profi, standard):
     assert r["rejected"][0]["reason"] == "forbidden"
 
 
+def test_standard_verbucht_mit_ganzer_zeile_wie_die_apps(profi, standard):
+    """iPhone und Mac schicken beim Abhaken die ganze Zeile. Die Instanz nahm
+    von Standard-Benutzern aber nur die Verbuchen-Felder an und lehnte alles
+    ab – der Posten war auf dem Gerät abgehakt, auf der Instanz nicht
+    (Durchsicht 17.10.2026). Unverändertes geht durch, Geändertes nicht."""
+    lid = profi.post("/api/lists", json={"name": "Börse"}).json()["id"]
+    profi.post(f"/api/lists/{lid}/items", json={"item_id": "sw1", "name": "x", "paid_price": 3})
+    posten = _saetze(standard, table="shopping_items")[0]
+    felder = dict(posten["fields"], done=1, done_by="standard", done_at=5)
+    r = _push(standard, {"table": "shopping_items", "uuid": posten["uuid"],
+                         "updated_at": posten["updated_at"] + 1, "base_rev": posten["rev"],
+                         "fields": felder})
+    assert r["rejected"] == []
+    neu = _saetze(profi, table="shopping_items")[0]["fields"]
+    assert neu["done"] == 1 and neu["paid_price"] == 3
+    r = _push(standard, {"table": "shopping_items", "uuid": posten["uuid"],
+                         "updated_at": posten["updated_at"] + 2, "base_rev": r["accepted"][0]["rev"],
+                         "fields": dict(felder, name="anders")})
+    assert r["rejected"][0]["reason"] == "forbidden"
+
+
 def test_archiv_verschwindet_fuer_standard_und_kommt_zurueck(profi, standard):
     """Das Archiv ist nur für Profis. Für Standard-Benutzer erscheint eine
     archivierte Liste samt Artikeln als gelöscht – und holt ein Profi sie
@@ -411,3 +432,28 @@ def test_push_auf_angebotene_zeile_zieht_angebote_nach(profi, monkeypatch):
     _push(profi, {"table": "collection", "uuid": "neu-1", "updated_at": 1,
                   "fields": {**FIGUR, "item_id": "sw0002", "added_at": 1}})
     assert nachgezogen == [1]
+
+
+def test_geraet_loescht_keine_marktpreise(profi):
+    """Marktpreise führt die Instanz. Ein Gerät, das seine Preise verfallen
+    ließ, schickte die Zeile mit leerem Preis zurück – 464 Einträge waren
+    danach ohne Preis (08.11.2026)."""
+    _eintrag(profi)
+    with core.db() as conn:
+        conn.execute("UPDATE collection SET price_new = 12.5, price_used = 8.0, "
+                     "price_updated_at = 1")
+    e = _saetze(profi, table="collection")[0]
+    r = _push(profi, {"table": "collection", "uuid": e["uuid"], "updated_at": e["updated_at"] + 1,
+                      "base_rev": e["rev"],
+                      "fields": {"price_new": None, "price_used": None, "price_data": None,
+                                 "price_updated_at": None, "notes": "neu"}})
+    assert r["rejected"] == []
+    item = profi.get("/api/collection").json()["items"][0]
+    assert item["price_new"] == 12.5 and item["price_used"] == 8.0
+    assert item["notes"] == "neu"
+
+
+def test_neuer_eintrag_vom_geraet_ohne_fremden_preis(profi):
+    _push(profi, {"table": "collection", "uuid": "neu", "updated_at": 1,
+                  "fields": {**FIGUR, "added_at": 1, "price_used": 999.0}})
+    assert profi.get("/api/collection").json()["items"][0]["price_used"] is None

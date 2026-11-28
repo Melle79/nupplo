@@ -601,12 +601,18 @@ def hub_publish(user: dict = Depends(admin_user)):
 
 
 @router.get("/api/hub/offers")
-def hub_offers(q: str = "", member: str = "",
-               user: dict = Depends(current_user)):
+def hub_offers(q: str = "", member: str = "", land: str = "",
+               kontinent: str = "", user: dict = Depends(current_user)):
     if not hub.enabled():
-        return {"offers": []}
+        return {"offers": [], "laender": []}
     try:
-        return {"offers": hub.offers({"q": q, "member": member})}
+        # Land und Kontinent filtert der Hub – er allein kennt die Profile.
+        # Ein Hub vor 1.30.0 übergeht die Parameter und liefert alles ohne
+        # `laender`; dann bleibt die Auswahl einfach leer.
+        res = hub.offers_mit_laendern({"q": q, "member": member,
+                                       "land": land, "kontinent": kontinent})
+        return {"offers": res.get("offers", []),
+                "laender": res.get("laender", [])}
     except hub.HubError as e:
         raise _hub_antwort(e)
     except requests.RequestException:
@@ -1753,6 +1759,9 @@ def _abgebbar() -> dict:
 class ProfilBody(BaseModel):
     about: str = Field(default="", max_length=280)
     region: str = Field(default="", max_length=60)
+    # ISO-Kürzel des Landes (Hub 1.30.0). None heißt „nicht mitgeschickt“ –
+    # dann lässt der Hub das gespeicherte Land stehen; "" löscht es.
+    country: str | None = Field(default=None, max_length=2)
     themes: list[str] = Field(default_factory=list, max_length=20)
     wants_public: bool = False
     show_collection: bool = False
@@ -1769,13 +1778,28 @@ def eigenes_profil(user: dict = Depends(current_user)):
     core.set_setting("hub_wuensche_zeigen", "1" if p.get("wants_public")
                      else "")
     p["figuren_hier"] = _sammlung_figuren()
+    p["land_vorschlag"] = _land_vorschlag()
     return p
+
+
+def _land_vorschlag() -> str:
+    """Land aus dem Preisgebiet, wenn dort eines eingestellt ist.
+
+    Nur ein Vorschlag fürs Formular: Hinaus geht das Land erst, wenn man das
+    Profil speichert. Regionen wie „europe“ sind kein Land und bleiben leer.
+    """
+    gebiet = integrations.price_region()
+    return gebiet if len(gebiet) == 2 and gebiet.isupper() else ""
 
 
 @router.put("/api/hub/profil")
 def profil_speichern(body: ProfilBody, user: dict = Depends(current_user)):
     _verbunden()
     daten = body.model_dump()
+    if body.country is None:
+        daten.pop("country")
+    else:
+        daten["country"] = body.country.strip().upper()
     daten["themes"] = [t.strip()[:40] for t in body.themes if t.strip()]
     if body.show_collection:
         daten["collection_count"] = _sammlung_figuren()
@@ -1792,6 +1816,7 @@ def profil_speichern(body: ProfilBody, user: dict = Depends(current_user)):
     else:
         core.set_setting("hub_wuensche_stand", "")
     p["figuren_hier"] = _sammlung_figuren()
+    p["land_vorschlag"] = _land_vorschlag()
     return p
 
 
@@ -1836,7 +1861,8 @@ def entdecken(user: dict = Depends(current_user)):
             "name": o["name"], "img_url": o.get("img_url"),
             "img_data": o.get("img_data"), "condition": o.get("condition"),
             "qty": o.get("qty") or 1, "deal": o.get("deal") or "tausch",
-            "price": o.get("price"), "currency": o.get("currency")}
+            "price": o.get("price"), "currency": o.get("currency"),
+            "country": o.get("country") or ""}
            for o in angebote
            if (o["item_id"], o.get("item_type") or "minifig") in gesucht]
 

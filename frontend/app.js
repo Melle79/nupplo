@@ -47,6 +47,26 @@ function tr(text, vars) {
   return out;
 }
 
+/* Meldungen des Servers mit eingesetzten Werten (3.9.27): „Preis zuletzt am
+   21.10.2026 geholt, …“ steht so nicht im Wörterbuch, wohl aber mit
+   „{datum}“. Erst der genaue Satz, dann die Muster mit Platzhaltern. */
+function trServer(text) {
+  if (dict[text] || lang !== "en") return tr(text);
+  for (const muster of SERVER_MUSTER) {
+    const m = text.match(muster.re);
+    if (m) return tr(muster.key, Object.fromEntries(muster.namen.map((n, i) => [n, m[i + 1]])));
+  }
+  return text;
+}
+const SERVER_MUSTER = [
+  "Preis zuletzt am {datum} geholt, wird bald aktualisiert.",
+].map((key) => {
+  const namen = [];
+  const re = new RegExp("^" + key.replace(/[.*+?^$()|[\]\\]/g, "\\$&")
+    .replace(/\{(\w+)\}/g, (_, n) => { namen.push(n); return "(.+?)"; }) + "$");
+  return { key, re, namen };
+});
+
 /* Datum und Uhrzeit in der Schreibweise der gewählten Sprache. */
 function dateLocale() { return lang === "en" ? "en-GB" : "de-DE"; }
 
@@ -301,7 +321,7 @@ async function api(path, options = {}) {
     // verständlicher Satz mit dem Grund, sofern einer dabei ist.
     const d = data.detail;
     let text;
-    if (typeof d === "string" && d) text = tr(d);
+    if (typeof d === "string" && d) text = trServer(d);
     else if (Array.isArray(d) && d.length) {
       // Gleiche Gründe nur einmal: „Der Text ist zu kurz; Der Text ist zu
       // kurz“ stand da, wenn Name und Passwort beide zu kurz waren.
@@ -501,6 +521,10 @@ function imgSrc(url, klein = false) {
 }
 
 /* Die volle Fassung zu einer Daumennagel-Adresse – für die Großansicht. */
+/* Brickmerges Setbildordner – der einzige Ort, aus dem der Browser selbst
+   Bilder lädt, statt über den eigenen Server (siehe setbilderEinsetzen). */
+const BRICKMERGE_BILDER = "https://www.brickmerge.de/img/sets/l/";
+
 function imgGross(adresse) {
   return String(adresse || "").replace(/&s=\d+$/, "");
 }
@@ -764,11 +788,12 @@ function renderWanted(items) {
       <div class="card-head">
         <img class="card-img" src="${imgSrc(it.img_url, true)}" data-gid="${esc(it.item_id)}" data-gtype="${esc(it.item_type || "minifig")}" alt="" loading="lazy">
         <div class="card-title tappbar" data-info="${esc(it.item_type || "minifig")}|${esc(it.item_id)}" data-info-name="${esc(it.name)}" data-info-img="${esc(it.img_url || "")}">
-          <strong>${esc(it.name)}</strong>
+          <strong>${esc(nameAnzeige(it))}</strong>
           <div class="sub">${esc(it.item_id)}${it.year > 0 ? " · " + it.year : ""}${prices ? " · " + prices : ""}</div>
           ${it.owned > 0 ? `<span class="badge badge-owned">${esc(tr("✔ {n}× in deiner Sammlung", { n: it.owned }))}</span>` : ""}
           ${it.on_lists && it.on_lists.length ? `<span class="badge badge-list" title="${esc(tr("Schon eingeplant – nicht doppelt kaufen"))}">🛒 ${it.on_lists_qty > 1 ? it.on_lists_qty + "× " : ""}${esc(tr("auf Einkaufsliste"))}: ${esc(it.on_lists.join(", "))}</span>` : ""}
           ${it.in_sets && !it.owned ? `<div class="sub in-sets"><span class="in-sets-label">${esc(tr("🧩 fehlt zu deinem Set:"))}</span>${inSetLinks(it.in_sets)}</div>` : ""}
+          ${it.im_bau ? `<span class="badge badge-bau" data-bau-badge>${esc(imBauText(it.im_bau))}</span>` : ""}
         </div>
       </div>
       ${needsBlNo && state.bricklinkLookup ? `
@@ -782,9 +807,12 @@ function renderWanted(items) {
            vier gleich große Knöpfe im Raster. -->
       <div class="card-actions scan-tasten">
         <button class="mini-btn add" data-buy>${esc(tr("✔ Gekauft!"))}</button>
+        ${(it.item_type || "minifig") === "minifig" && !needsBlNo
+          ? `<button class="mini-btn" data-bau>${esc(tr("🧩 Teil für Teil"))}</button>` : ""}
         <button class="mini-btn zeichen loesch" data-del
           title="${esc(tr("Löschen"))}" aria-label="${esc(tr("Löschen"))}">🗑</button>
       </div>
+      <div class="set-figs" data-bau-out hidden></div>
       ${priceGuideUrl(it) || it.bricklink_url ? `<div class="karte-weiter">
         ${priceGuideUrl(it) ? `<a href="${esc(priceGuideUrl(it))}" target="_blank" rel="noopener">${esc(tr("Preisverlauf"))} ↗</a>` : ""}
         ${it.bricklink_url ? `<a href="${esc(it.bricklink_url)}" target="_blank" rel="noopener">${esc(tr("Bei BrickLink ansehen"))} ↗</a>` : ""}
@@ -874,6 +902,9 @@ function renderWanted(items) {
       });
     }
 
+    const bauBtn = card.querySelector("[data-bau]");
+    if (bauBtn) bauBtn.addEventListener("click", () => teilFuerTeil(card, item, bauBtn));
+
     card.querySelector("[data-buy]").addEventListener("click", () => {
       const actions = card.querySelector(".card-actions");
       const dealer = state.user && state.user.is_dealer;
@@ -940,6 +971,10 @@ function applySuggestInfo(info, withDetail, geprueft) {
   document.querySelectorAll("[data-sug-id]").forEach((card) => {
     const d = info[card.dataset.sugId];
     if (!d) return;
+    if (d.wanted && livescanTonFaellig && card.closest("#scan-results")) {
+      livescanTonFaellig = false;
+      livescanTon();
+    }
     const ownedEl = card.querySelector("[data-owned]");
     const hasSets = d.in_sets || (d.all_sets && d.all_sets.length);
     if (hasSets) {
@@ -1054,13 +1089,46 @@ function applySuggestInfo(info, withDetail, geprueft) {
       // es nur, wo tatsächlich nachgefragt wurde.
       if (geprueft && geprueft.has(card.dataset.sugId)
           && d.new == null && d.used == null) {
-        parts.push(tr("keine Preisdaten bei BrickLink"));
+        // Mit dem Preisdienst fragt die Instanz BrickLink gar nicht – dann
+        // fehlt der Preis im Hub, nicht bei BrickLink (10.10.2026).
+        parts.push(keinPreisSatz(false));
       }
       if (sub && parts.length) {
         sub.textContent = card.dataset.sugBase + " · " + parts.join(" · ");
       }
     }
   });
+}
+
+/* Was dasteht, wenn eine Figur keinen Preis hat – je nach Preisquelle.
+   Mit dem Preisdienst fragt die Instanz BrickLink gar nicht; dann fehlt
+   der Preis im Hub, nicht bei BrickLink (10.10.2026). **Die einzige Stelle
+   mit diesen Sätzen** – ein Test hält das fest, damit nicht wieder eine
+   Ansicht den BrickLink-Satz fest verdrahtet. */
+/* „Preis bei BrickLink ansehen“ – steht überall, wo kein frischer Preis da
+   ist (3.9.17). Ohne eigenen Schlüssel gibt es nur Star Wars und Herr der
+   Ringe; die Stelle soll trotzdem nicht leer bleiben. */
+function preisBeiBrickLink(it) {
+  const url = priceGuideUrl(it);
+  return url ? `<a class="price-note" href="${esc(url)}" target="_blank"
+    rel="noopener">${esc(tr("Preis bei BrickLink ansehen"))} ↗</a>` : "";
+}
+
+function keinPreisSatz(satzanfang) {
+  const hub = state.preisquelle === "hub";
+  if (satzanfang) {
+    return hub ? tr("Noch kein Preis im Preisdienst.")
+               : tr("Keine Preisdaten bei BrickLink.");
+  }
+  return hub ? tr("noch kein Preis im Preisdienst")
+             : tr("keine Preisdaten bei BrickLink");
+}
+
+/* Anzeigename: bei Sets der deutsche Name, wenn es einen gibt und die
+   Oberfläche deutsch ist. Nur fürs Auge – gespeichert bleibt `name`. */
+function nameAnzeige(it) {
+  if (!it) return "";
+  return (state.lang !== "en" && it.name_de) || it.name;
 }
 
 let gallery = { urls: [], idx: 0 };
@@ -1083,13 +1151,25 @@ function imgKey(u) {
   return m ? "bl:" + m[1] : k;
 }
 
-function openGallery(startUrl, gid, gtype) {
+// `dazu`: weitere Bilder, die mit in die Galerie gehören (Brickmerges
+// Setbilder, siehe `setbilderEinsetzen`) – zum Wischen, ohne Umweg.
+function openGallery(startUrl, gid, gtype, dazu = []) {
   // `ersatz` ist die Adresse, die an der Karte steht. Sie fliegt aus der
   // Galerie, sobald der Server etwas liefert – sonst stünde dasselbe Motiv
   // zweimal drin. Aufgehoben wird sie trotzdem: Lädt das Katalogbild
   // nicht, ist sie das Einzige, was noch bleibt.
-  gallery = { urls: startUrl ? [startUrl] : [], idx: 0, eigene: {},
+  const mitDazu = (liste) => {
+    const gesehen = new Set(liste.map(imgKey));
+    dazu.forEach((u) => {
+      if (u && !gesehen.has(imgKey(u))) { gesehen.add(imgKey(u)); liste.push(u); }
+    });
+    return liste;
+  };
+  const startIdx = (liste) =>
+    Math.max(0, liste.findIndex((u) => imgKey(u) === imgKey(startUrl || "")));
+  gallery = { urls: mitDazu(startUrl ? [startUrl] : []), idx: 0, eigene: {},
               ersatz: startUrl || "" };
+  gallery.idx = startIdx(gallery.urls);
   renderGallery();
   $("lightbox").hidden = false;
   if (gid && !gid.startsWith("manuell-")) {
@@ -1121,9 +1201,13 @@ function openGallery(startUrl, gid, gtype) {
           if (u && !seen.has(k)) { seen.add(k); urls.push(u); }
         });
         if (startUrl && !urls.length) urls.push(startUrl);
+        mitDazu(urls);
         if (urls.length) {
+          // Steht man schon auf einem anderen Bild, bleibt es dabei.
+          const jetzt = gallery.urls[gallery.idx];
           gallery.urls = urls;
-          gallery.idx = Math.min(gallery.idx, urls.length - 1);
+          const da = urls.findIndex((u) => imgKey(u) === imgKey(jetzt || ""));
+          gallery.idx = da >= 0 ? da : Math.min(gallery.idx, urls.length - 1);
           renderGallery();
         }
       })
@@ -1134,6 +1218,11 @@ function openGallery(startUrl, gid, gtype) {
 function renderGallery() {
   const aktuell = gallery.urls[gallery.idx] || "";
   $("lightbox-img").src = aktuell;
+  // Blättert man in der Großansicht, wandert die Bilderreihe darunter mit.
+  document.querySelectorAll(".sb-galerie").forEach((l) => {
+    const i = (l._voll || []).indexOf(aktuell);
+    if (i >= 0) galerieMarkieren(l, i);
+  });
   const many = gallery.urls.length > 1;
   const eigen = gallery.eigene && gallery.eigene[aktuell];
   $("lb-count").textContent = (many
@@ -1204,26 +1293,37 @@ function priceGuideUrl(it) {
 }
 
 // Nach dem Hinzufügen eines Sets: enthaltene Figuren mit übernehmen?
-async function askSetFigures(item, condition) {
+// `neue`: Figuren, die zu einem schon erfassten Set erst später bekannt
+// wurden (siehe `neueSetFigurenFragen`) – dann nur diese, ohne Abruf.
+// `rest`: wie viele Sets danach noch fragen – dann gibt es „Alle
+// überspringen“, und die Antwort ist -1.
+async function askSetFigures(item, condition, neue = null, rest = 0) {
   if ((item.item_type || "") !== "set") return 0;
   // Eigene und manuelle Sets stehen in keinem Katalog – nicht nachfragen.
   if (/^(custom-|manuell-)/.test(item.item_id || "")) return 0;
   const overlay = $("setfigs-overlay");
   const body = $("setfigs-body");
   if (!overlay || !body) return 0;
-  let figs = [];
-  try {
-    const data = await api(`/set_figs/${encodeURIComponent(item.item_id)}`);
-    figs = data.items || [];
-  } catch (_) {
-    return 0;   // keine BrickLink-Schlüssel oder Set unbekannt: still überspringen
+  let figs = neue || [];
+  if (!neue) {
+    try {
+      const data = await api(`/set_figs/${encodeURIComponent(item.item_id)}`);
+      figs = data.items || [];
+    } catch (_) {
+      return 0; // Set unbekannt: still überspringen
+    }
   }
   if (!figs.length) return 0;
   const cond = condition === "new" ? "new" : "used";
-  body.innerHTML = `
-    <p class="search-hint">„${esc(item.name)}" enthält laut BrickLink
+  const frage = neue
+    ? `Zu „${esc(item.name)}" aus deiner Sammlung gehört jetzt auch
+      <b>${figs.length === 1 ? tr("diese Minifigur") : tr("{n} weitere Minifiguren", { n: figs.length })}</b>.
+      ${tr("Hast du sie?")}`
+    : `„${esc(item.name)}" enthält
       <b>${figs.length} Minifigur${figs.length === 1 ? "" : "en"}</b>.
-      Welche davon sind dabei?</p>
+      Welche davon sind dabei?`;
+  body.innerHTML = `
+    <p class="search-hint">${frage}</p>
     <div class="setfigs-cond">
       <label for="setfigs-cond">Zustand der Figuren</label>
       <select id="setfigs-cond">
@@ -1245,13 +1345,17 @@ async function askSetFigures(item, condition) {
     <div class="btn-grid">
       <button class="btn btn-outline" id="setfigs-none">Keine übernehmen</button>
       <button class="btn btn-primary" id="setfigs-ok">Übernehmen</button>
-    </div>`;
+    </div>
+    ${rest > 0 ? `<button class="mini-btn setfigs-rest" id="setfigs-rest">${esc(
+      rest === 1 ? tr("Auch das nächste Set überspringen")
+        : tr("Auch die übrigen {n} Sets überspringen", { n: rest }))}</button>` : ""}`;
   overlay.hidden = false;
 
   return new Promise((resolve) => {
     const finish = (n) => { overlay.hidden = true; resolve(n); };
     $("btn-setfigs-close").onclick = () => finish(0);
     $("setfigs-none").onclick = () => finish(0);
+    if ($("setfigs-rest")) $("setfigs-rest").onclick = () => finish(-1);
     $("setfigs-toggle").onclick = () => {
       const boxes = [...body.querySelectorAll("[data-fig]")];
       const anyOff = boxes.some((b) => !b.checked);
@@ -1283,6 +1387,26 @@ async function askSetFigures(item, condition) {
       finish(done);
     };
   });
+}
+
+// Ein Set, das zum Release gekauft und erfasst wurde, kannte BrickLink oft
+// noch ohne Figur (75455-1). Der Nachtlauf ergänzt den Inhalt später; „so
+// still bitte nicht“ (10.10.2026) – also hier dieselbe Frage wie beim
+// Erfassen, je Set einmal, ob übernommen oder nicht.
+async function neueSetFigurenFragen() {
+  let sets = [];
+  try { sets = (await api("/set_neue_figuren")).sets || []; } catch (_) { return; }
+  // Viele auf einmal (eine frische Windows-Installation bis 0.5.4 fragte
+  // jedes Polybag einzeln): „Auch die übrigen überspringen“ erledigt den Rest.
+  let alle = false;
+  for (const [i, s] of sets.entries()) {
+    if (!alle && await askSetFigures(s, s.condition, s.figuren, sets.length - i - 1) === -1) alle = true;
+    try {
+      await api("/set_neue_figuren/erledigt",
+        { method: "POST", body: { set_no: s.item_id } });
+    } catch (_) { /* dann eben beim nächsten Öffnen */ }
+  }
+  if (sets.length && typeof loadCollection === "function") loadCollection();
 }
 
 // Beim Löschen eines Sets: enthaltene Figuren mit entfernen?
@@ -1376,8 +1500,10 @@ async function loadSetFigs(card, item, btn) {
     const data = await api(`/set_figs/${encodeURIComponent(item.item_id)}`);
     const figs = data.items || [];
     out.dataset.loaded = "1";
-    if (!figs.length) {
-      out.innerHTML = `<div class="price-note">Laut BrickLink enthält dieses Set keine Minifiguren.</div>`;
+    if (data.unbekannt) {
+      out.innerHTML = `<div class="price-note">${esc(tr("Welche Figuren in diesem Set stecken, ist hier noch nicht gespeichert."))}</div>`;
+    } else if (!figs.length) {
+      out.innerHTML = `<div class="price-note">${esc(tr("Dieses Set enthält keine Minifiguren."))}</div>`;
     } else {
       out.innerHTML = figs.map((f, i) => `
         <div class="fig-row tappbar" data-fig-row="${i}" data-info="minifig|${esc(f.item_id)}" data-info-name="${esc(f.name)}" data-info-img="${esc(f.img_url || "")}">
@@ -1385,6 +1511,7 @@ async function loadSetFigs(card, item, btn) {
           <div class="fig-info">
             <strong>${esc(f.name)}</strong>
             <div class="sub">${esc(f.item_id)}${f.qty > 1 ? ` · ${f.qty}× im Set` : ""}
+              ${f.exklusiv ? `<span class="badge badge-exklusiv" title="${esc(tr("Gibt es nur in diesem Set"))}">${esc(tr("Exklusiv"))}</span>` : ""}
               <span class="badge badge-owned" data-fig-badge hidden></span></div>
             <div class="fig-actions" data-fig-actions>
               <button class="mini-btn add" data-fig-add="${i}">${esc(tr("＋ Sammlung"))}</button>
@@ -1430,6 +1557,597 @@ async function loadSetFigs(card, item, btn) {
   } finally {
     btn.disabled = false;
   }
+}
+
+/* „Im Bau 2/3" (3.9.0): Wer von einer gewünschten Figur schon Teile hat,
+   hakt sie ab. Die Häkchen stehen am Wunsch (`teile_da`) und gehen mit dem
+   Abgleich auf die iOS-App. */
+function artName(art) {
+  return ({ kopf: tr("Kopf"), haare: tr("Haare"), kopfbedeckung: tr("Kopfbedeckung"),
+    torso: tr("Oberkörper"), beine: tr("Beine"), hals: tr("Halsteil"),
+    zubehoer: tr("Zubehör"), sonst: "" })[art] || "";
+}
+
+function imBauText(b) {
+  return b.gesamt
+    ? tr("🧱 Im Bau {da}/{gesamt}", { da: b.da, gesamt: b.gesamt })
+    : tr("🧱 Im Bau");
+}
+
+/* BrickLink-Seite eines Teils, die Farbe gleich vorgewählt. */
+function teilBricklinkUrl(t) {
+  if (!t || !t.item_id) return "";
+  const basis = t.bricklink_url
+    || "https://www.bricklink.com/v2/catalog/catalogitem.page?P="
+       + encodeURIComponent(t.item_id);
+  return t.color_id != null && t.color_id !== ""
+    ? basis + (basis.includes("?") ? "&" : "?") + "idColor="
+      + encodeURIComponent(t.color_id)
+    : basis;
+}
+
+function bauListeHtml(teile, teileDa, hinweis = "") {
+  const da = new Set(teileDa || []);
+  return `<div class="price-head"><span>${esc(tr("Welche Teile hast du schon?"))}</span></div>`
+    + (hinweis ? `<div class="price-note">${esc(hinweis)}</div>` : "")
+      // **Nur das Kästchen hakt ab, das Teil führt zu BrickLink** – mit der
+      // Farbe vorgewählt (11.10.2026). Vorher war die ganze Zeile ein
+      // <label>, und jeder Tipp auf Bild oder Namen schaltete den Haken um.
+      + teile.map((t, i) => {
+        const bl = teilBricklinkUrl(t);
+        const teil = `<img class="card-img fig-img" src="${imgSrc(t.img_url, true)}" alt="" loading="lazy">
+        <div class="fig-info">
+          ${artName(t.art) ? `<div class="sub bau-art">${esc(artName(t.art))}</div>` : ""}
+          <strong>${esc(t.name || t.item_id)}</strong>
+          <div class="sub">${esc(t.item_id)}${t.color_name ? ` · ${esc(t.color_name)}` : ""}${t.qty > 1 ? ` · ${t.qty}×` : ""}</div>
+        </div>`;
+        return `
+      <div class="fig-row bau-teil${da.has(t.key) ? " bau-da" : ""}">
+        <input type="checkbox" data-bau-key="${esc(t.key)}" ${da.has(t.key) ? "checked" : ""}
+          aria-label="${esc(tr("{teil} schon da", { teil: t.name || t.item_id }))}">
+        ${bl ? `<a class="bau-teil-link" href="${esc(bl)}" target="_blank" rel="noopener"
+          title="${esc(tr("Bei BrickLink ansehen"))}">${teil}</a>` : teil}
+      </div>`;
+      }).join("");
+}
+
+/* „Teil für Teil" auch in Suche und Steckbrief (3.9.14). Bis dahin ging das
+   Puzzle nur über die Wunschliste: Figur suchen, merken, zur Wunschliste,
+   aufklappen. 11.10.2026: „können wir das nicht auch in der Suche
+   unterbringen … wandert es automatisch in die Wunschliste?" – Der erste
+   Haken setzt die Figur auf die Wunschliste. Wer abhakt, sammelt sie;
+   gesagt wird es trotzdem, vorher im Hinweis und danach als Meldung.
+   `ziel`: davor kommt der Abschnitt. `daten`: schon geholte Teile. */
+async function teilFuerTeilAnbieten(ziel, fig, daten, beiNeu) {
+  if (!ziel || !fig || /^(fig-|manuell-|custom-)/.test(fig.item_id)) return;
+  let d = daten;
+  try {
+    if (!d || d.teile_da === undefined) {
+      d = await api(`/figurteile/${encodeURIComponent(fig.item_id)}`);
+    }
+  } catch (_) { return; }
+  const teile = (d && d.teile) || [];
+  if (!teile.length || !ziel.isConnected) return;
+  let teileDa = d.teile_da || [];
+  let aufListe = !!d.auf_wunschliste;
+  const zeile = document.createElement("div");
+  zeile.className = "detail-row";
+  zeile.innerHTML = `<button class="mini-btn" data-bau-such>${esc(tr("🧩 Teil für Teil"))}</button>`
+    + `<span class="badge badge-bau" data-bau-such-badge hidden></span>`;
+  const out = document.createElement("div");
+  out.className = "set-figs";
+  out.hidden = true;
+  ziel.before(zeile, out);
+  const badge = zeile.querySelector("[data-bau-such-badge]");
+  const badgeZeigen = (b) => {
+    badge.hidden = !b || !b.da;
+    if (b && b.da) badge.textContent = imBauText(b);
+  };
+  if (teileDa.length) badgeZeigen({ da: teileDa.length, gesamt: teile.length });
+
+  zeile.querySelector("[data-bau-such]").addEventListener("click", () => {
+    if (out.dataset.loaded) { out.hidden = !out.hidden; return; }
+    out.dataset.loaded = "1";
+    out.hidden = false;
+    out.innerHTML = bauListeHtml(teile, teileDa, aufListe ? ""
+      : tr("Hak ab, was du schon hast. Die Figur kommt dann auf deine Wunschliste."));
+    out.querySelectorAll("[data-bau-key]").forEach((cb) => {
+      cb.addEventListener("change", async () => {
+        const keys = [...out.querySelectorAll("[data-bau-key]:checked")]
+          .map((x) => x.dataset.bauKey);
+        cb.closest(".bau-teil").classList.toggle("bau-da", cb.checked);
+        try {
+          const r = await api(`/figurteile/${encodeURIComponent(fig.item_id)}/haken`, {
+            method: "PUT", body: { teile_da: keys, name: fig.name || "",
+              img_url: fig.img_url || "", bricklink_url: fig.bricklink_url || "",
+              year: fig.year > 0 ? fig.year : 0 } });
+          teileDa = keys;
+          badgeZeigen(r);
+          if (r.neu) {
+            aufListe = true;
+            const note = out.querySelector(".price-note");
+            if (note) note.remove();
+            toast(tr("Auf die Wunschliste gesetzt ⭐"));
+            if (beiNeu) beiNeu();
+          }
+        } catch (e) {
+          cb.checked = !cb.checked;
+          cb.closest(".bau-teil").classList.toggle("bau-da", cb.checked);
+          toast(e.message);
+        }
+      });
+    });
+  });
+}
+
+/* Vom Einzelteil zu den Figuren, die es tragen (3.9.14): Wer in der
+   Teilesuche einen weißen Stormtrooper-Helm findet, kommt von hier zur
+   Figur und dort zum Puzzle. Ein Tipp öffnet den Steckbrief der Figur. */
+async function inFigurenAnbieten(ziel, nr, farbe) {
+  if (!ziel || !nr) return;
+  let d;
+  try {
+    const f = farbe === undefined || farbe === null ? "" : String(farbe);
+    d = await api(`/figurteile/teil/${encodeURIComponent(nr)}`
+      + (f ? `?farbe=${encodeURIComponent(f)}` : ""));
+  } catch (_) { return; }
+  const figuren = (d && d.figuren) || [];
+  if (!figuren.length || !ziel.isConnected) return;
+  const box = document.createElement("div");
+  box.innerHTML = `<div class="price-head"><span>${esc(tr("🧍 Steckt in diesen Figuren"))}</span></div>`
+    + figuren.map((p) => `
+      <div class="fig-row tappbar" data-info="minifig|${esc(p.item_no)}" data-info-name="${esc(p.name || p.item_no)}" data-info-img="${esc(p.img_url || "")}">
+        <img class="card-img fig-img" src="${imgSrc(p.img_url, true)}" alt="" loading="lazy">
+        <div class="fig-info"><strong>${esc(p.name || p.item_no)}</strong>
+          ${p.name ? `<div class="sub">${esc(p.item_no)}</div>` : ""}</div>
+      </div>`).join("")
+    + (d.weitere ? `<div class="price-note">${esc(
+        tr("und {n} weitere", { n: d.weitere }))}</div>` : "");
+  ziel.before(box);
+}
+
+async function teilFuerTeil(card, item, btn) {
+  const out = card.querySelector("[data-bau-out]");
+  if (out.dataset.loaded) {
+    out.hidden = !out.hidden;
+    return;
+  }
+  btn.disabled = true;
+  try {
+    const d = await api(`/figurteile/${encodeURIComponent(item.item_id)}`);
+    const teile = d.teile || [];
+    out.dataset.loaded = "1";
+    out.hidden = false;
+    if (!teile.length) {
+      out.innerHTML = `<div class="price-note">${esc(tr("Zu dieser Figur kennen wir noch keine Teile."))}</div>`;
+      return;
+    }
+    out.innerHTML = bauListeHtml(teile, item.teile_da);
+    out.querySelectorAll("[data-bau-key]").forEach((cb) => {
+      cb.addEventListener("change", async () => {
+        const keys = [...out.querySelectorAll("[data-bau-key]:checked")]
+          .map((x) => x.dataset.bauKey);
+        cb.closest(".bau-teil").classList.toggle("bau-da", cb.checked);
+        try {
+          const r = await api(`/wanted/${item.id}/teile`, { method: "PUT",
+            body: { teile_da: keys } });
+          item.teile_da = keys;
+          item.im_bau = keys.length ? { da: r.da, gesamt: r.gesamt } : null;
+          let badge = card.querySelector("[data-bau-badge]");
+          if (item.im_bau) {
+            if (!badge) {
+              badge = document.createElement("span");
+              badge.className = "badge badge-bau";
+              badge.dataset.bauBadge = "";
+              card.querySelector(".card-title").appendChild(badge);
+            }
+            badge.textContent = imBauText(item.im_bau);
+          } else if (badge) {
+            badge.remove();
+          }
+        } catch (e) {
+          cb.checked = !cb.checked;
+          cb.closest(".bau-teil").classList.toggle("bau-da", cb.checked);
+          toast(e.message);
+        }
+      });
+    });
+  } catch (e) {
+    toast(e.message);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+/* „Zwei Figuren, ein Unterschied" (3.9.0): Figuren, die sich nur in einem
+   Teil unterscheiden, und woran man sie auseinanderhält. Ist nur der Kopf
+   anders und tragen beide einen Helm, sieht man es erst ohne Helm. */
+function teilKurz(t, englisch) {
+  // Auf Deutsch das Ding selbst („Entfernungsmesser (Hellblaugrau)"), seit
+  // die Prüffrage am 10.10.2026 englisch dastand. Der Katalogdienst liefert
+  // es mit; fehlt es, bleibt BrickLinks Name.
+  if (lang === "de" && !englisch && t.name_de) {
+    const farbe = t.color_name_de || t.color_name;
+    return `${t.name_de}${farbe ? ` (${farbe})` : ""}`;
+  }
+  // BrickLink stellt Figurenteilen ein „Minifigure, " voran – in der
+  // Prüffrage unter dem Scan-Treffer machte das aus dem Entfernungsmesser
+  // von sw1423 vier Zeilen Text (Simulator, 10.10.2026).
+  const name = (t.name || t.item_id).replace(/^Minifigure,\s*/i, "");
+  return `${name}${t.color_name ? ` (${t.color_name})` : ""}`;
+}
+
+/* Hier- und Dort-Teile eines Doppelgängers als Text. Zwei verschiedene
+   Helme heißen auf Deutsch beide „Helm" – dann trennt nur BrickLinks
+   englischer Name, und den nehmen wir. */
+function dgTeile(p) {
+  const text = (l, en) => l.map((t) => teilKurz(t, en)).join(", ");
+  let hier = text(p.hier);
+  let dort = text(p.dort);
+  if (hier && hier === dort) {
+    hier = text(p.hier, true);
+    dort = text(p.dort, true);
+  }
+  return { hier, dort };
+}
+
+/* Die unterscheidenden Teile als Streifen unter dem Satz – „könnte man das
+   Teil noch einblenden lassen?" und „welcher Kopf gehört wohin?" (11.10.2026). Links die Teile der offenen Figur (`hier`) mit ihrer
+   Nummer, „↔", rechts die des Doppelgängers (`dort`) mit seiner. Fehlt auf
+   einer Seite ein Teil, steht dort ein gestrichelter Kasten „ohne". Wie in
+   der iOS-App (0.49.16). Jedes Bild führt zu BrickLink in der Farbe. */
+/* Der kurze Satz über dem Streifen: nur Teileart und Farbe, die Bilder
+   zeigen den Rest. „Mit Head, Modified SW Yoda Straight Ears … statt Head,
+   Modified SW Yoda …" war bei sw0446a zwei Zeilen englischer Text. */
+const ANDERES_TEIL = {
+  kopf: "Mit anderem Kopf", torso: "Mit anderem Oberkörper",
+  beine: "Mit anderen Beinen", kopfbedeckung: "Mit anderer Kopfbedeckung",
+  haare: "Mit anderen Haaren", hals: "Mit anderem Halsteil",
+  zubehoer: "Mit anderem Zubehör",
+};
+function dgKurzSatz(p) {
+  const hier = p.hier || [], dort = p.dort || [];
+  const name = (t) => t.name_de || artName(t.art) || teilKurz(t);
+  const farbe = dgFarbe;
+  const mitFarbe = (t) => `${name(t)}${farbe(t) ? ` (${farbe(t)})` : ""}`;
+  const liste = (l) => l.map(mitFarbe).join(", ");
+  if (hier.length && !dort.length) return tr("Ohne {teil}", { teil: liste(hier) });
+  if (!hier.length && dort.length) return tr("Zusätzlich mit {teil}", { teil: liste(dort) });
+  if (hier.length === 1 && dort.length === 1) {
+    const [a, b] = [hier[0], dort[0]];
+    if (name(a) === name(b)) {
+      if (farbe(a) && farbe(b) && farbe(a) !== farbe(b)) {
+        return tr("Mit {teil} ({b}) statt ({a})", { teil: name(b), b: farbe(b), a: farbe(a) });
+      }
+      if (ANDERES_TEIL[b.art] && b.art === a.art) return tr(ANDERES_TEIL[b.art]);
+    }
+  }
+  // Dieselben Teile, alle in einer anderen Farbe: „Beine und Oberkörper in
+  // Hellblaugrau statt Hellgrau" statt zweimal jedes Teil mit Farbe
+  // (sw0002/sw0002a, 16.10.2026).
+  // Mehrere Farbpaare mit Komma: „Beine in Hellblaugrau statt Hellgrau,
+  // Helm in …“ – wie in der iOS-App.
+  const u = dgUnterschiede(p);
+  if (u.farbe.length && !u.aufdruck.length && !u.anders.length && !u.ohne.length
+      && !u.mit.length && u.farbe.every(([a, b]) => dgFarbe(a) && dgFarbe(b))) {
+    const paare = new Map();
+    u.farbe.forEach(([a, b]) => {
+      const k = `${dgFarbe(a)}|${dgFarbe(b)}`;
+      paare.set(k, [...(paare.get(k) || []), a]);
+    });
+    return [...paare].map(([k, teile]) => {
+      const [fa, fb] = k.split("|");
+      return tr("{teil} in {b} statt {a}", { teil: dgNamen(teile), a: fa, b: fb });
+    }).join(", ");
+  }
+  if (u.aufdruck.length > 1 && !u.farbe.length && !u.anders.length
+      && !u.ohne.length && !u.mit.length) {
+    return tr("{teil}: anderer Aufdruck", { teil: dgNamen(u.aufdruck.map(([, b]) => b)) });
+  }
+  return tr("Mit {b} statt {a}", { a: liste(hier), b: liste(dort) });
+}
+
+/* Ein Teil groß: Bild, Name, Farbe, zu welcher Figur es gehört, BrickLink. */
+function teilGrossZeigen(t) {
+  document.getElementById("teil-gross")?.remove();
+  const o = document.createElement("div");
+  o.id = "teil-gross";
+  o.className = "teil-gross-overlay";
+  const url = teilBricklinkUrl(t);
+  const farbe = t.color_name_de || t.color_name || "";
+  o.innerHTML = `<div class="teil-gross" role="dialog" aria-modal="true">
+      <button class="card-modal-close" data-zu aria-label="${esc(tr("Schließen"))}">✕</button>
+      <img src="${imgGross(imgSrc(t.img_url))}" alt="">
+      <strong>${esc(t.name_de || t.name || t.item_id)}</strong>
+      ${t.name_de && t.name ? `<div class="sub">${esc(t.name.replace(/^Minifigure,\s*/i, ""))}</div>` : ""}
+      <div class="sub">${esc(t.item_id)}${farbe ? ` · ${esc(farbe)}` : ""}</div>
+      ${t.figur ? `<div class="sub">${esc(tr("gehört zu {nr}", { nr: t.figur }))}</div>` : ""}
+      ${url ? `<a href="${esc(url)}" target="_blank" rel="noopener">${esc(tr("Bei BrickLink ansehen"))} ↗</a>` : ""}
+    </div>`;
+  const zu = () => { o.remove(); document.removeEventListener("keydown", taste, true); };
+  const taste = (ev) => { if (ev.key === "Escape") { ev.stopPropagation(); zu(); } };
+  o.addEventListener("click", (ev) => {
+    if (ev.target === o || ev.target.closest("[data-zu]")) zu();
+  });
+  document.addEventListener("keydown", taste, true);
+  document.body.appendChild(alsEigenMerken(o));
+}
+document.addEventListener("click", (ev) => {
+  const b = ev.target.closest("[data-dg-teil]");
+  if (!b) return;
+  ev.stopPropagation();
+  try { teilGrossZeigen(JSON.parse(b.dataset.dgTeil)); } catch (_) { /* kaputt: nichts */ }
+});
+
+function dgTeileBilder(p, eigeneNr, nehmen = false) {
+  if (p.verdeckt || (!(p.hier || []).length && !(p.dort || []).length)) return "";
+  // **Groß ansehen statt BrickLink** (11.10.2026): Ein Tipp öffnet
+  // das Teil im eigenen Fenster mit Name, Farbe und Figur; BrickLink steht
+  // dort als Verweis. „Teil für Teil" behält den direkten Weg.
+  const bild = (t, nr) => {
+    const titel = teilKurz(t);
+    return `<button type="button" class="dg-teil" data-dg-teil="${esc(JSON.stringify(
+      { ...t, figur: nr || "" }))}" title="${esc(titel)}" aria-label="${esc(titel)}"><img src="${
+      imgSrc(t.img_url, true)}" alt="" loading="lazy"></button>`;
+  };
+  // `nehmen`: Unter dem Scan-Treffer sind die Nummern Knöpfe – ein Tipp
+  // übernimmt genau diese Figur, darum geht es in der Prüffrage.
+  const nummer = (nr, wer) => nehmen
+    ? `<button type="button" class="dg-nr dg-nehmen" data-dg-nehmen="${wer}"
+        title="${esc(tr("{nr} übernehmen", { nr }))}">${esc(nr || "")}</button>`
+    : `<div class="dg-nr">${esc(nr || "")}</div>`;
+  const seite = (teile, nr, wer) => `<div class="dg-seite">
+      <div class="dg-bilder">${teile.length ? teile.map((t) => bild(t, nr)).join("")
+        : `<span class="dg-teil dg-ohne">${esc(tr("ohne"))}</span>`}</div>
+      ${nummer(nr, wer)}
+    </div>`;
+  return `<div class="dg-teile">${seite(p.hier || [], eigeneNr, "eigen")}
+    <span class="dg-pfeil" aria-hidden="true">↔</span>${seite(p.dort || [], p.item_no, "andere")}</div>`;
+}
+
+function doppelgaengerHtml(liste, eigeneNr = "") {
+  if (!liste || !liste.length) return "";
+  // Dieselbe Figur in anderer Schreibweise (LLP002a / llp002a) nur einmal,
+  // und nie die offene Figur selbst – die Datei der Probe hatte beides.
+  const gesehen = new Set([String(eigeneNr).toLowerCase()]);
+  liste = liste.filter((p) => {
+    const k = String(p.item_no || "").toLowerCase();
+    if (!k || gesehen.has(k)) return false;
+    gesehen.add(k);
+    return true;
+  });
+  if (!liste.length) return "";
+  const zeilen = liste.slice(0, 4).map((p) => {
+    let wie;
+    if (p.verdeckt) {
+      wie = tr("Nur ohne Helm zu unterscheiden: Der Kopf ist anders.");
+    // **Aus Sicht der Figur in der Zeile.** „Hier zusätzlich: Entfernungs-
+    // messer" stand unter sw1422 im Steckbrief von sw1423 – gemeint war die
+    // offene Figur, gelesen wurde die Zeile (11.10.2026). Jetzt sagt
+    // jede Zeile, wie sich die genannte Figur unterscheidet – derselbe
+    // Wortlaut wie in der iOS-App.
+    } else if (p.hier.length || p.dort.length) {
+      wie = dgKurzSatz(p);
+    } else if (p.hier.length && !p.dort.length) {
+      wie = tr("Ohne {teil}", { teil: dgTeile(p).hier });
+    } else if (!p.hier.length && p.dort.length) {
+      wie = tr("Zusätzlich mit {teil}", { teil: dgTeile(p).dort });
+    } else if (p.hier.length) {
+      wie = tr("Mit {b} statt {a}", { a: dgTeile(p).hier, b: dgTeile(p).dort });
+    } else {
+      wie = tr("Dieselben Teile – nicht zu unterscheiden.");
+    }
+    return `<div class="fig-row tappbar" data-info="minifig|${esc(p.item_no)}" data-info-name="${esc(p.name || p.item_no)}" data-info-img="${esc(p.img_url || "")}">
+      <img class="card-img fig-img" src="${imgSrc(p.img_url, true)}" data-gid="${esc(p.item_no)}" data-gtype="minifig" alt="" loading="lazy">
+      <div class="fig-info">
+        <strong>${esc(p.name || p.item_no)}</strong>
+        <div class="sub">${esc(p.item_no)}</div>
+        <div class="sub dg-wie">${esc(wie)}</div>
+        ${dgTeileBilder(p, eigeneNr)}
+      </div>
+    </div>`;
+  }).join("");
+  return `<div class="price-head"><span>${esc(tr("👯 Leicht zu verwechseln"))}</span></div>${zeilen}`;
+}
+
+/* Gleich unter dem Scan-Treffer (3.9.0, Svens Wunsch vom 09.10.2026):
+   „Mit Entfernungsmesser? Dann sw1423, sonst sw1422." – ohne Artikel,
+   denn welcher passt, hängt am Teil (der Helm, die Antenne).
+   Im Steckbrief stand das schon – aber wer fotografiert, übernimmt meist
+   direkt aus der Trefferliste und sieht den Steckbrief nie. */
+function scanPruefFrage(it, p) {
+  const a = it.item_id;
+  const b = p.item_no;
+  const { hier, dort } = dgTeile(p);
+  if (p.verdeckt) {
+    return tr("Nimm den Helm ab: {a} und {b} unterscheidet nur der Kopf.", { a, b });
+  }
+  if (p.hier.length && !p.dort.length) {
+    return tr("Mit {teil}? Dann {a}, sonst {b}.", { teil: hier, a, b });
+  }
+  if (!p.hier.length && p.dort.length) {
+    return tr("Mit {teil}? Dann {b}, sonst {a}.", { teil: dort, a, b });
+  }
+  if (p.hier.length) {
+    return tr("{ta}: {a} · {tb}: {b}", { ta: hier, a, tb: dort, b });
+  }
+  return tr("Von {b} nicht zu unterscheiden – dieselben Teile.", { b });
+}
+
+/* Was genau trennt zwei Figuren? Die Teile, die nur eine hat, werden
+   zuerst gepaart: gleiche Teilenummer in anderer Farbe ist ein Farbwechsel,
+   gleiche Grundform mit anderem Aufdruck (`pb…` in BrickLinks Nummer) ein
+   Aufdruck, sonst ein anderes Teil derselben Art. Was übrig bleibt, hat
+   nur eine Seite. Anlass: Bei Boba Fett sw0002 stand zweimal „Mit oder
+   ohne Beine?“, obwohl sw0002a und sw0002b dieselben Beine und denselben
+   Oberkörper haben, nur in Hellblaugrau statt Hellgrau (16.10.2026). */
+function dgUnterschiede(p) {
+  const rang = (t) => { const i = REIHE.indexOf(t.art); return i < 0 ? REIHE.length : i; };
+  const hier = [...(p.hier || [])].sort((x, y) => rang(x) - rang(y));
+  const dort = [...(p.dort || [])].sort((x, y) => rang(x) - rang(y));
+  // `form` (seit 3.9.19 vom Server) ist die Nummer ohne BrickLinks Zusatz
+  // „cNN“: Die echten Beine von sw0002 und sw0002a heißen 970c09 und
+  // 970c86, dieselbe Form in Hellgrau und Hellblaugrau. Ohne das wurde
+  // daraus „Welche Beine?“ (Nupplo Test, 16.10.2026).
+  const form = (t) => String(t.form || t.item_id || "").toLowerCase();
+  // Aufdruck heißt bei BrickLink „pb…“, bei alten Teilen „px…“ (Helme
+  // x50px1 gegen x50px3 bei sw0002/sw0002b, iOS-App 16.10.2026).
+  const grund = (t) => form(t).replace(/p[bx]\d+[a-z]?/g, "");
+  const sicht = (t) => dgFarbe(t);
+  const farbe = [], aufdruck = [], anders = [];
+  const paaren = (passt, ziel) => {
+    for (let i = 0; i < hier.length; i++) {
+      const j = dort.findIndex((d) => passt(hier[i], d));
+      if (j < 0) continue;
+      ziel.push([hier[i], dort[j]]);
+      hier.splice(i--, 1);
+      dort.splice(j, 1);
+    }
+  };
+  // Gleiche Form in gleicher Farbe (Arme anders, c01 gegen c02) ist keine
+  // Farbfrage; das fällt unten unter „anderes Teil“.
+  paaren((a, b) => form(a) && form(a) === form(b) && sicht(a) !== sicht(b), farbe);
+  paaren((a, b) => grund(a) && grund(a) === grund(b), aufdruck);
+  paaren((a, b) => a.art && a.art !== "sonst" && a.art === b.art, anders);
+  return { farbe, aufdruck, anders, ohne: hier, mit: dort };
+}
+
+/* Die Farbe, in der man das Teil sieht: bei Beinen 970cNN die der Beine,
+   nicht die der Hüfte, die im Eintrag steht. */
+function dgFarbe(t) {
+  return (lang === "de" && (t.form_farbe_de || t.color_name_de))
+    || t.form_farbe || t.color_name || "";
+}
+
+const REIHE = ["kopfbedeckung", "haare", "kopf", "hals", "torso", "beine", "zubehoer"];
+
+/* „Helm, Oberkörper und Beine" – die Namen der Teile für eine Frage. */
+function dgNamen(teile) {
+  // Auf Englisch die übersetzte Art („Legs and Torso") – `name_de` stand
+  // sonst deutsch im englischen Satz.
+  const name = (t) => (lang === "de" && t.name_de) || artName(t.art)
+    || (t.name || t.item_id || "").replace(/^Minifigure,\s*/i, "");
+  // Von oben nach unten wie an der Figur und wie in der iOS-App: „Helm,
+  // Oberkörper und Beine“ – auf :8399 stand „Helm, Beine und Oberkörper“,
+  // weil die Reihenfolge der Teileliste galt (17.10.2026).
+  const rang = (t) => { const i = REIHE.indexOf(t.art); return i < 0 ? REIHE.length : i; };
+  const n = [...new Set([...teile].sort((x, y) => rang(x) - rang(y)).map(name))];
+  return n.length > 1 ? `${n.slice(0, -1).join(", ")} ${tr("und")} ${n[n.length - 1]}` : (n[0] || "");
+}
+
+/* Die kurze Frage über dem Teilestreifen unter einem Treffer: „Welcher
+   Kopf? Davon hängt die Nummer ab." Die beiden langen englischen Kopfnamen
+   bei sw0637/sw0637a waren vier Zeilen (11.10.2026). Seit 3.9.18
+   nennt sie die Art des Unterschieds: Farbe, Aufdruck, anderes Teil oder
+   ein Teil, das nur eine der beiden hat. */
+function scanKurzFrage(p) {
+  const u = dgUnterschiede(p);
+  const fragen = [];
+  // Farbwechsel nach Farbpaar: „Beine und Oberkörper in Hellgrau oder
+  // Hellblaugrau?" – zuerst die Farbe der Figur im Treffer.
+  const farbname = dgFarbe;
+  const paare = new Map();
+  u.farbe.forEach(([a, b]) => {
+    const k = `${farbname(a)}|${farbname(b)}`;
+    paare.set(k, [...(paare.get(k) || []), a]);
+  });
+  paare.forEach((teile, k) => {
+    const [a, b] = k.split("|");
+    fragen.push(a && b
+      ? tr("{teil} in {a} oder {b}?", { teil: dgNamen(teile), a, b })
+      : tr("{teil} in welcher Farbe?", { teil: dgNamen(teile) }));
+  });
+  const welche = [];
+  // Mehrere Teile nur anders bedruckt (Scout Trooper sw0518/sw1002: Helm,
+  // Oberkörper und Beine, 17.10.2026) – dreimal „Welcher Aufdruck auf …“
+  // hintereinander las sich wie ein Formular.
+  if (u.aufdruck.length > 1) {
+    fragen.push(tr("{teil}: anderer Aufdruck.", { teil: dgNamen(u.aufdruck.map(([a]) => a)) }));
+  } else {
+    u.aufdruck.forEach(([a]) => welche.push(tr(AUFDRUCK[a.art] || "Welcher Aufdruck")));
+  }
+  u.anders.forEach(([a]) => welche.push(tr(WELCHE[a.art] || "Welches Teil")));
+  const w = [...new Set(welche)];
+  if (w.length) {
+    fragen.push(`${w.map((x, i) => (i ? x.charAt(0).toLowerCase() + x.slice(1) : x))
+      .join(` ${tr("und")} `)}?`);
+  }
+  const einseitig = u.ohne.concat(u.mit);
+  if (einseitig.length) {
+    fragen.push(tr("Mit oder ohne {teil}?", { teil: dgNamen(einseitig) }));
+  }
+  if (!fragen.length) return tr("Dieselben Teile – nicht zu unterscheiden.");
+  return fragen.length === 1 ? `${fragen[0]} ${tr("Davon hängt die Nummer ab.")}` : fragen.join(" ");
+}
+const WELCHE = { kopf: "Welcher Kopf", torso: "Welcher Oberkörper",
+  beine: "Welche Beine", kopfbedeckung: "Welche Kopfbedeckung",
+  haare: "Welche Haare", hals: "Welches Halsteil", zubehoer: "Welches Zubehör" };
+const AUFDRUCK = { kopf: "Welches Gesicht", torso: "Welcher Aufdruck auf dem Oberkörper",
+  beine: "Welcher Aufdruck auf den Beinen", kopfbedeckung: "Welcher Aufdruck auf der Kopfbedeckung",
+  haare: "Welcher Aufdruck auf den Haaren", hals: "Welcher Aufdruck auf dem Halsteil",
+  zubehoer: "Welcher Aufdruck auf dem Zubehör" };
+
+/* Zwei Doppelgänger mit derselben Frage untereinander sahen aus wie ein
+   doppelter Eintrag (16.10.2026). Dann steht vor jeder die Nummer,
+   um die es geht. */
+function scanFragen(liste) {
+  const texte = liste.map(scanKurzFrage);
+  return texte.map((t, i) => (texte.indexOf(t) !== texte.lastIndexOf(t)
+    ? `${liste[i].item_no}: ${t}` : t));
+}
+
+function scanDoppelgaenger(box, items) {
+  items.slice(0, 3).forEach((it, i) => {
+    if ((it.item_type || "minifig") !== "minifig") return;
+    api(`/figurteile/${encodeURIComponent(it.item_id)}?nur_datei=1`).then((t) => {
+      const gesehen = new Set([it.item_id.toLowerCase()]);
+      const liste = (t.doppelgaenger || []).filter((p) => {
+        const k = String(p.item_no || "").toLowerCase();
+        if (!k || gesehen.has(k)) return false;
+        gesehen.add(k);
+        return true;
+      }).slice(0, 3);
+      const card = box.querySelectorAll("[data-sug-id]")[i];
+      if (!liste.length || !card || card.dataset.sugId !== it.item_id) return;
+      const fragen = scanFragen(liste);
+      const zeilen = liste.map((p, k) => {
+        const streifen = !p.verdeckt && ((p.hier || []).length || (p.dort || []).length);
+        if (!streifen) {
+          return `<div class="scan-dg-zeile tappbar"
+          data-info="minifig|${esc(p.item_no)}" data-info-name="${esc(p.name || p.item_no)}"
+          data-info-img="${esc(p.img_url || "")}">${esc(scanPruefFrage(it, p))}</div>`;
+        }
+        return `<div class="scan-dg-zeile" data-dg-k="${k}">${esc(fragen[k])}
+          ${dgTeileBilder(p, it.item_id, true)}</div>`;
+      }).join("");
+      card.querySelector(".card-actions").insertAdjacentHTML("beforebegin",
+        `<div class="scan-dg"><strong>${esc(tr("👯 Erst prüfen – es gibt eine fast gleiche Figur"))}</strong>${zeilen}</div>`);
+      card.querySelectorAll("[data-dg-nehmen]").forEach((b) => {
+        b.addEventListener("click", (ev) => {
+          ev.stopPropagation();
+          const p = liste[Number(b.closest("[data-dg-k]").dataset.dgK)];
+          if (b.dataset.dgNehmen === "andere") {
+            // Die Karte wird zur anderen Figur: dieselben Knöpfe lesen
+            // `items[i]`, also genügt es, den Eintrag zu tauschen.
+            const nr = p.item_no;
+            items[i] = { ...items[i], item_id: nr, name: p.name || nr,
+              img_url: p.img_url || "", bricklink_url:
+                "https://www.bricklink.com/v2/catalog/catalogitem.page?M="
+                + encodeURIComponent(nr) };
+            card.dataset.sugId = nr;
+            const st = card.querySelector(".card-title strong");
+            if (st) st.textContent = p.name || nr;
+            const sub = card.querySelector("[data-sug-sub]");
+            if (sub) sub.textContent = nr;
+            const img = card.querySelector(".card-img");
+            if (img && p.img_url) img.src = imgSrc(p.img_url, true);
+          }
+          card.querySelector(".scan-dg")?.remove();
+          card.querySelector("[data-add], [data-suggest]")?.click();
+        });
+      });
+    }).catch(() => {});
+  });
 }
 
 async function loadFigParts(card, item, btn) {
@@ -1519,6 +2237,34 @@ async function markFigOwnership(out, figs) {
    Stelle, ohne dass man die Ansicht verlässt.                                */
 
 let steckbriefZuletzt = null;
+/* Durchblättern: Wer den Steckbrief aus einer Liste öffnet (die Figuren
+   eines Sets), kommt mit ‹ ›, den Pfeiltasten oder einem Wisch zur
+   nächsten, ohne ihn zu schließen (wie Nupplo für Mac, 23.11.2026, Sven:
+   „sollte man diese durchswipen können“). `liste`: [{typ, id, name, img}]. */
+let steckbriefFolge = null;
+
+function steckbriefBlaettern(schritt) {
+  const f = steckbriefFolge;
+  if (!f || $("figinfo-overlay").hidden) return false;
+  const i = f.index + schritt;
+  if (i < 0 || i >= f.liste.length) return false;
+  const e = f.liste[i];
+  steckbriefOeffnen(e.id, e.typ, { name: e.name, img_url: e.img }, { liste: f.liste, index: i });
+  return true;
+}
+
+function steckbriefFolgeZeigen() {
+  const f = steckbriefFolge;
+  const zurueck = $("btn-figinfo-zurueck"), vor = $("btn-figinfo-vor");
+  if (!zurueck || !vor) return;
+  const an = !!f && f.liste.length > 1;
+  zurueck.hidden = vor.hidden = !an;
+  $("figinfo-zaehler").hidden = !an;
+  if (!an) return;
+  zurueck.disabled = f.index <= 0;
+  vor.disabled = f.index >= f.liste.length - 1;
+  $("figinfo-zaehler").textContent = `${f.index + 1} / ${f.liste.length}`;
+}
 
 function steckbriefSchliessen() {
   const ov = $("figinfo-overlay");
@@ -1585,12 +2331,14 @@ function steckbriefPreiseHtml(d) {
     + `</div>`;
 }
 
-async function steckbriefOeffnen(itemId, itemType, vorschau) {
+async function steckbriefOeffnen(itemId, itemType, vorschau, folge = null) {
   const ov = $("figinfo-overlay");
   const body = $("figinfo-body");
   if (!ov || !body) return;
   const typ = itemType || "minifig";
   steckbriefZuletzt = { itemId, typ };
+  steckbriefFolge = folge;
+  steckbriefFolgeZeigen();
   $("figinfo-head").textContent = vorschau && vorschau.name
     ? vorschau.name : itemId;
   body.innerHTML = `
@@ -1638,6 +2386,31 @@ async function steckbriefOeffnen(itemId, itemType, vorschau) {
       ${d.wanted ? "" : `<button class="mini-btn" data-fi-want>☆ Merken</button>`}
       <a class="mini-btn link" href="${esc(bl)}" target="_blank" rel="noopener">BrickLink ↗</a>
     </div>`;
+
+  if (typ === "minifig") {
+    api(`/figurteile/${encodeURIComponent(itemId)}`).then((t) => {
+      if (!steckbriefZuletzt || steckbriefZuletzt.itemId !== itemId) return;
+      const html = doppelgaengerHtml(t.doppelgaenger, itemId);
+      const ziel = body.querySelector(".fi-actions");
+      if (html && ziel) ziel.insertAdjacentHTML("beforebegin",
+        `<div class="fi-doppelgaenger">${html}</div>`);
+      teilFuerTeilAnbieten(ziel, { item_id: itemId, name: (vorschau && vorschau.name) || "",
+        img_url: (vorschau && vorschau.img_url) || "", bricklink_url: bl, year: jahr },
+      t, () => {
+        const w = body.querySelector("[data-fi-want]");
+        if (w) w.remove();
+        const keins = body.querySelector(".fi-badges .badge-none");
+        if (keins) {
+          keins.className = "badge badge-wanted";
+          keins.textContent = tr("⭐ auf deiner Wunschliste");
+        }
+      });
+    }).catch(() => {});
+  }
+  if (typ === "part") {
+    inFigurenAnbieten(body.querySelector(".fi-actions"), itemId,
+      vorschau && vorschau.color_id);
+  }
 
   // Wie im Steckbrief der Sammlung: erst die Kurzzeile, dann die vollen
   // Preise mit Spanne, Verkaufszahl, Gebiet und Angeboten (seit 2.90.15).
@@ -1856,6 +2629,13 @@ function collSubId(it) {
 function collSubMeta(it) {
   let s = it.condition === "new" ? tr("Neu") : tr("Gebraucht");
   if (unitValue(it)) s += " · Ø " + fmtEur(unitValue(it)) + fallbackFlagText(it);
+  if (state.preisquelle === "hub" && it.item_type === "set" && unitValue(it)
+      && it.price_updated_at
+      && Date.now() / 1000 - it.price_updated_at > 26 * 3600) {
+    const datum = new Date(it.price_updated_at * 1000)
+      .toLocaleDateString(dateLocale());
+    s += " · " + tr("Preisstand {datum}", { datum });
+  }
   return s;
 }
 
@@ -1944,7 +2724,8 @@ function renderFigSets(root, item) {
   };
 
   paint(null);   // eigene Sets sofort anzeigen
-  if (item.item_type === "minifig" && state.bricklinkPrices
+  // Ohne BrickLink-Schlüssel auch: Die Sets kommen zuerst aus der Teiledatei.
+  if (item.item_type === "minifig"
       && !/^(fig-|manuell-|custom-)/.test(item.item_id)) {
     api(`/fig_sets/${encodeURIComponent(item.item_id)}`)
       .then((d) => paint(d.sets)).catch(() => { /* eigene bleiben stehen */ });
@@ -2050,7 +2831,9 @@ function angebotBlock(stock) {
  * ist — die Angebotspreise sind eine Zugabe, kein Inhalt.
  */
 async function angeboteEintragen(container) {
-  if (!state.angebote || !container) return;
+  // In Nupplo für Windows nur im Steckbrief: Für ganze Listen verdoppelten
+  // die „ab“-Preise die Abrufe am Tageslimit des Geräts (25.11.2026).
+  if (!state.angebote || !container || state.desktop) return;
   const zeilen = [...container.querySelectorAll("[data-info]")];
   const gesucht = new Map();
   zeilen.forEach((el) => {
@@ -2092,10 +2875,17 @@ async function angeboteEintragen(container) {
 const ANSICHT_KEY = "bf_ansicht";
 
 function showTab(name) {
+  // „live“ ist keine eigene Seite, sondern Scannen im Live-Modus – wie in
+  // der Mac-App, wo derselbe Scan-Bildschirm mit `bildschirm: true` läuft
+  // (07.11.2026: „in der Menüleiste links, genau so wie in der
+  // Mac-App“). Erkennung, Treffer und Knöpfe sind damit dieselben.
+  const live = name === "live";
+  if (live) name = "scan";
   ["scan", "collection", "lists", "stats", "hub", "settings"].forEach((t) => {
     $("view-" + t).hidden = t !== name;
   });
-  spur("Ansicht: " + name);
+  $("view-scan").classList.toggle("live-modus", live);
+  spur("Ansicht: " + (live ? "live" : name));
   try { localStorage.setItem(ANSICHT_KEY, name); } catch (_) { /* egal */ }
   sammlungFreigeben(name);
   listenFreigeben(name);
@@ -2124,7 +2914,7 @@ function showTab(name) {
     if (!reihumLaeuft) reihumAufraeumen();
   }
   document.querySelectorAll(".tab").forEach((b) =>
-    b.classList.toggle("active", b.dataset.tab === name));
+    b.classList.toggle("active", b.dataset.tab === (live ? "live" : name)));
   letzterStand = null;           // frisch geladen ist per Definition aktuell
   /* **Der Ladevorgang wird zurückgegeben**, damit ein Aufrufer darauf warten
      kann. `jumpToSet` brauchte das: Es lud sonst ein zweites Mal, und die
@@ -2135,7 +2925,7 @@ function showTab(name) {
   if (name === "stats") loadStats();
   if (name === "hub") loadHubView();
   else updatePolling();          // außerhalb des Tausch-Tabs ruhiger takten
-  if (name === "settings") { loadSettings(); katThemenLadenAlle(); }
+  if (name === "settings") { loadSettings(); katThemenLadenAlle(); ladeAbgleich(); }
   return geladen;
 }
 
@@ -2616,6 +3406,11 @@ let wizPasswort = "";
 
 function startWizard() {
   $("view-login").hidden = true;
+  // Am eigenen Rechner ist die App beim Start schon sichtbar (das Konto
+  // legt das Programm selbst an). Ohne das lag der Assistent über der
+  // Seite und blieb dort, auch im Tab Sammlung (Probelauf 06.11.2026).
+  // `endWizard` zeigt sie über `showApp` wieder.
+  $("app").hidden = true;
   $("view-wizard").hidden = false;
   wizStep = 1;
   showWizStep();
@@ -2678,7 +3473,8 @@ function showWizStep() {
   document.querySelectorAll("#view-wizard .wiz-step").forEach((el) => {
     el.hidden = Number(el.dataset.step) !== wizStep;
   });
-  tfaBlockUmziehen(wizStep === WIZ_TFA);
+  if (state.desktop) abgleichBlockUmziehen(wizStep === WIZ_TFA);
+  else tfaBlockUmziehen(wizStep === WIZ_TFA);
   $("wiz-step-of").textContent = tr("Schritt {n} von {max}",
     { n: wizStep, max: WIZ_LAST });
   $("wiz-back").hidden = wizStep === 1;
@@ -2690,6 +3486,7 @@ function showWizStep() {
 
 function endWizard() {
   tfaBlockUmziehen(false);
+  abgleichBlockUmziehen(false);
   wizPasswort = "";
   $("view-wizard").hidden = true;
   showApp();
@@ -2711,6 +3508,17 @@ async function saveWizStep() {
       const res = await api("/settings/price_region", { method: "POST",
         body: { region: sel.value, currency: $("wiz-currency").value } });
       setCurrency(res.currency);
+    }
+    // Erst das Gebiet, dann die Quelle: Beim Wechsel auf den Preisdienst
+    // lädt der Server sofort die Liste des eingestellten Gebiets.
+    // „Erst mal keine Preise“ und nichts gewählt ändern nichts.
+    // Ohne Schlüssel gibt es nichts zu speichern: Die Quelle folgt dem
+    // Schlüssel. Mit Schlüssel nur, alle wie viele Stunden geholt wird.
+    const wahl = document.querySelector('input[name="wiz-quelle"]:checked');
+    const stunden = parseInt($("wiz-abruf-stunden").value, 10);
+    if (wahl && wahl.value === "bricklink" && stunden >= 1) {
+      await api("/settings/preisabruf", { method: "POST",
+        body: { stunden } });
     }
   } else if (wizStep === 3 || wizStep === 4) {
     const fields = wizStep === 3
@@ -2742,9 +3550,22 @@ async function saveWizStep() {
 
 let wizWired = false;
 
+/* Am eigenen Rechner (Nupplo für Windows) steht auf Schritt 7 statt
+   „Absichern“ der Abgleich – beides im Markup, das CSS zeigt eines. */
+function wizNaechster(schritt, richtung) {
+  return schritt + richtung;
+}
+
 function wireWizardOnce() {
   if (wizWired) return;
   wizWired = true;
+
+  // „Preise holen alle … Stunden“ nur mit eigenem Schlüssel.
+  document.querySelectorAll('input[name="wiz-quelle"]').forEach((r) => {
+    r.addEventListener("change", () => {
+      $("wiz-abruf").hidden = r.value !== "bricklink" || !r.checked;
+    });
+  });
 
   $("wiz-owner").addEventListener("input", () => {
     // Vorschau zeigt den **fertigen Titel**, nicht den nackten Namen –
@@ -2760,7 +3581,7 @@ function wireWizardOnce() {
     try {
       await saveWizStep();
       if (wizStep === WIZ_LAST) { endWizard(); return; }
-      wizStep += 1;
+      wizStep = wizNaechster(wizStep, 1);
       showWizStep();
     } catch (e) {
       $("wiz-error").textContent = e.message;
@@ -2769,11 +3590,11 @@ function wireWizardOnce() {
   });
 
   $("wiz-skip").addEventListener("click", () => {
-    wizStep = Math.min(wizStep + 1, WIZ_LAST);
+    wizStep = Math.min(wizNaechster(wizStep, 1), WIZ_LAST);
     showWizStep();
   });
   $("wiz-back").addEventListener("click", () => {
-    wizStep = Math.max(wizStep - 1, 1);
+    wizStep = Math.max(wizNaechster(wizStep, -1), 1);
     showWizStep();
   });
   $("wiz-quit").addEventListener("click", endWizard);
@@ -2784,9 +3605,7 @@ function wireWizardOnce() {
     out.textContent = tr("Teste …");
     try {
       const r = await api("/settings/test", { method: "POST" });
-      out.innerHTML =
-        `BrickLink: ${r.bricklink.ok ? "✅" : "❌"} ${esc(r.bricklink.info)}<br>`
-        + `Rebrickable: ${r.rebrickable.ok ? "✅" : "❌"} ${esc(r.rebrickable.info)}`;
+      out.innerHTML = testZeilen(r).map(esc).join("<br>");
     } catch (e) { out.textContent = e.message; }
   });
 }
@@ -2837,6 +3656,7 @@ function showApp() {
   updateInstallCard();
   $("view-login").hidden = true;
   $("app").hidden = false;
+  livescanLaden();
   $("whoami").textContent = state.user ? state.user.username : "";
   setzeGruss();
   api("/config").then((c) => {
@@ -2860,6 +3680,16 @@ function showApp() {
     if ($("opt-jedipedia")) $("opt-jedipedia").checked = state.jedipedia;
     state.angebote = !!c.angebotspreise;
     if ($("opt-angebote")) $("opt-angebote").checked = state.angebote;
+    state.brickmergePreise = !!c.brickmerge_preise;
+    if ($("opt-brickmerge-preise")) {
+      $("opt-brickmerge-preise").checked = state.brickmergePreise;
+    }
+    state.brickmergeBilder = !!c.brickmerge_bilder;
+    if ($("opt-brickmerge-bilder")) {
+      $("opt-brickmerge-bilder").checked = state.brickmergeBilder;
+    }
+    state.preisquelle = c.preisquelle || "bricklink";
+    angeboteHinweis();
     updateHubTab();
     updatePolling();
     standTaktStarten();
@@ -2873,6 +3703,7 @@ function showApp() {
   // Start auch tun. Der Server holt im Hintergrund nur, was sich geändert
   // hat, und höchstens alle 15 Minuten – hier wird auf nichts gewartet.
   api("/katalog/auffrischen", { method: "POST" }).catch(() => {});
+  neueSetFigurenFragen();
   // **Vor** der Diagnose: Sie schreibt gleich in ihre Startzeile, was in der
   // Seite fremd ist – und das geht nur, wenn vorher feststeht, was von uns
   // stammt.
@@ -2985,6 +3816,7 @@ async function ladeConnect() {
       try {
         await api("/connect", { method: "POST", body: { an } });
         $("connect-stand").textContent = an ? tr("⏳ Verbindet …") : tr("Aus.");
+        $("connect-2fa-block").hidden = !an;
         // Die Leitung baut sich im Hintergrund auf – kurz danach den
         // echten Stand zeigen, samt Grund, falls der Vermittler abweist.
         if (an) setTimeout(ladeConnect, 3000);
@@ -3010,6 +3842,7 @@ async function ladeConnect() {
     const d = await api("/connect");
     $("connect-an").checked = d.an;
     $("connect-2fa").checked = !!d.nur_2fa;
+    $("connect-2fa-block").hidden = !d.an;
     const el = $("connect-stand");
     if (!d.an) el.textContent = tr("Aus.");
     else if (d.verbunden) {
@@ -3249,6 +4082,12 @@ function uebernehmeAnmeldung(data) {
 }
 
 function logout() {
+  if (state.desktop) {
+    // Am eigenen Rechner gibt es kein Passwort, das man eingeben könnte;
+    // ein neues Token bringt nur ein Neustart des Programms (90 Tage oder
+    // ein zurückgesetzter Sitzungszähler).
+    toast(tr("Bitte Nupplo neu starten"));
+  }
   state.token = "";
   state.user = null;
   localStorage.removeItem("bf_token");
@@ -3789,7 +4628,7 @@ function kameraAusloesen() {
   }, "image/jpeg", 0.92);
 }
 
-async function handlePhoto(file) {
+async function handlePhoto(file, vorab = null) {
   if (!file) return;
   // Das Original bleibt als Datei-Handle liegen (nicht entpackt, kostet also
   // nichts): Ausschnitte kommen von dort, nicht aus der Vorschau. Aus 1200 px
@@ -3821,12 +4660,19 @@ async function handlePhoto(file) {
   form.append("file", file, "scan.jpg");
   spur("Erkennung läuft");
   try {
-    const data = await api("/scan", { method: "POST", body: form });
+    // `vorab`: Der Live-Scanner hat schon gefragt – er muss vorher wissen,
+    // ob etwas erkannt wurde, sonst ersetzte ein leerer Abzug den Treffer.
+    const data = vorab || await api("/scan", { method: "POST", body: form });
     spur(`Erkennung fertig (${(data.items || []).length} Treffer)`);
     const b = data.box;
     scanBoxen = b && b.right > b.left && b.lower > b.upper
       ? [{ x: b.left, y: b.upper, w: b.right - b.left, h: b.lower - b.upper }]
       : [];
+    // Schachtel-Code erkannt (cmf.py)? Den Scanner dafür gibt es nur in den
+    // mobilen Apps (16.10.2026); hier zählt nur der Treffer. Das Foto
+    // zeigt dann die Schachtel, nicht die Figur – als Bild am Artikel
+    // taugt es nicht.
+    if (data.schachtel) { lastScanFile = null; updateScanCustomBtns(); }
     renderScanResults(data.items || []);
     rahmenZeigen(data.box);
   } catch (e) {
@@ -3981,6 +4827,7 @@ function scanAuswahlEinrichten() {
     const status = $("scan-status");
     const gefunden = [];
     const kaesten = [];
+    const nummern = [];
     try {
       const werk = await arbeitBildHolen();
       try {
@@ -3997,13 +4844,14 @@ function scanAuswahlEinrichten() {
             if (d.items && d.items[0]) {
               gefunden.push(d.items[0]);
               kaesten.push(gemerkteRahmen[i]);
+              nummern.push(i + 1);
             }
           } catch (_) { /* eine weniger, der Rest läuft weiter */ }
         }
       } finally { arbeitBildFreigeben(); }
       if (!gefunden.length) { toast(tr("Nichts erkannt.")); return; }
       scanBoxen = kaesten;
-      renderScanResults(gefunden);
+      renderScanResults(gefunden, nummern);
       toast(gefunden.length === 1 ? tr("1 Figur erkannt ✔")
         : tr("{n} Figuren erkannt ✔", { n: gefunden.length }));
     } finally {
@@ -4233,9 +5081,15 @@ async function alleFigurenErkennen(weiter = false) {
       toast(tr("Nichts erkannt – Rahmen von Hand ziehen."));
       return;
     }
+    // In Lesereihenfolge nummerieren: Zeile für Zeile von oben, in der Zeile
+    // von links. Die Erkennung findet die Figuren in beliebiger Folge – die
+    // obere Reihe hieß sonst „16, 8, 13, 5 …" (11.10.2026).
+    const folge = leseReihenfolge(z.treffer);
+    z.treffer = folge.map((i) => z.treffer[i]);
+    z.gefunden = folge.map((i) => z.gefunden[i]);
     mehrfachRahmen(z.treffer);
     scanBoxen = z.treffer;
-    renderScanResults(z.gefunden);
+    renderScanResults(z.gefunden, z.gefunden.map((_, i) => i + 1));
     const neu = z.gefunden.length - vorher;
     toast(neu === 1 ? tr("1 Figur erkannt ✔")
       : tr("{n} Figuren erkannt ✔", { n: neu }));
@@ -4258,6 +5112,31 @@ async function alleFigurenErkennen(weiter = false) {
     status.hidden = true;
     status.querySelector("[data-scan-text]").textContent = tr("Erkenne …");
   }
+}
+
+/* Indizes der Rahmen `{x, y, w, h}` in Lesereihenfolge.
+
+   Zeilen: nach der Mitte von oben nach unten durchgehen; ein Rahmen gehört
+   zur laufenden Zeile, solange seine Mitte höchstens eine halbe mittlere
+   Rahmenhöhe unter der Mitte der Zeile liegt. Dann jede Zeile von links nach
+   rechts. Figuren auf einem Regalbrett stehen nie ganz gleich hoch – ein
+   reines Sortieren nach y risse sie auseinander. */
+function leseReihenfolge(boxen) {
+  const mitte = (b) => b.y + b.h / 2;
+  const hoehen = boxen.map((b) => b.h).sort((a, b) => a - b);
+  const halb = (hoehen[Math.floor(hoehen.length / 2)] || 0) / 2;
+  const nachY = boxen.map((b, i) => i).sort((a, b) => mitte(boxen[a]) - mitte(boxen[b]));
+  const zeilen = [];
+  for (const i of nachY) {
+    const z = zeilen[zeilen.length - 1];
+    if (z && mitte(boxen[i]) - z.mitte <= halb) {
+      z.idx.push(i);
+      z.mitte = z.idx.reduce((s, k) => s + mitte(boxen[k]), 0) / z.idx.length;
+    } else {
+      zeilen.push({ idx: [i], mitte: mitte(boxen[i]) });
+    }
+  }
+  return zeilen.flatMap((z) => z.idx.sort((a, b) => boxen[a].x - boxen[b].x));
 }
 
 /* Alle gefundenen Bereiche gleichzeitig einrahmen. */
@@ -4374,6 +5253,9 @@ let eigenbildAn = localStorage.getItem(EIGENBILD_KEY) === "1";
    nur schaut oder abbricht, lädt nichts hoch. */
 async function eigenbildAnhaengen(it, i, erzwingen = false) {
   if (!it || it._eigenbild) return;
+  // Im Live-Scanner entscheiden die Haken an den Ansichten, nicht der
+  // Schalter „Mein Foto zusätzlich“ – den gibt es dort nicht (Mac-App).
+  if (livescanModus() && livescanEintrag()) return livescanAnsichtenAnhaengen(it);
   if (!eigenbildAn && !erzwingen) return;
   let datei = null;
   try {
@@ -4401,8 +5283,17 @@ async function eigenbildAnhaengen(it, i, erzwingen = false) {
   }
 }
 
-function renderScanResults(items) {
+/* `nummern`: bei mehreren Figuren die Nummer des Rahmens im Foto je Treffer.
+   Bei 21 Figuren war sonst nicht zu sehen, welche Karte zu welchem Rahmen
+   gehört (11.10.2026). Nummern statt Position, weil von Hand gezogene
+   Rahmen ohne Treffer wegfallen – die Lücke bleibt dann sichtbar. */
+function renderScanResults(items, nummern = null) {
   const box = $("scan-results");
+  // Die Reihenfolge kommt schon aufsteigend und muss bleiben: `scanBoxen[i]`
+  // gehört zur Karte i (Ausschnitt fürs eigene Foto).
+  if (!nummern || nummern.length !== items.length || items.length < 2) {
+    nummern = null;
+  }
   if (!items.length) {
     box.innerHTML = `<p class="empty">Keine Übereinstimmung gefunden.<br>
       Versucht es mit besserem Licht und neutralem Hintergrund –
@@ -4430,6 +5321,7 @@ function renderScanResults(items) {
     return `
     <div class="card" data-sug-id="${esc(it.item_id)}" data-sug-base="${esc(base)}">
       <div class="card-head">
+        ${nummern ? `<span class="scan-nr" aria-label="${esc(tr("Rahmen {n}", { n: nummern[i] }))}">${nummern[i]}</span>` : ""}
         <img class="card-img" src="${imgSrc(it.img_url, true)}" data-gid="${esc(it.item_id)}" data-gtype="${esc(it.item_type || "minifig")}" alt="" loading="lazy">
         <div class="card-title">
           <strong>${esc(it.name)}</strong>
@@ -4504,6 +5396,7 @@ function renderScanResults(items) {
   // **vor** dem Verdrahten der Knöpfe: Die Karte stand da, „＋ Zur Sammlung"
   // tat nichts, und es gab nicht einmal eine Fehlermeldung.
   enrichSuggestions(items);
+  scanDoppelgaenger(box, items);
   wireWantButtons(box, items, eigenbildAnhaengen);
   wireCartButtons(box, items, eigenbildAnhaengen);
 
@@ -4513,7 +5406,8 @@ function renderScanResults(items) {
   box.querySelectorAll("[data-sug-id]").forEach((card, i) => {
     card.classList.add("tappable");
     card.addEventListener("click", (ev) => {
-      if (ev.target.closest("button, a, input, textarea, select, label, .card-img")) return;
+      // [data-info]: Der Prüfhinweis öffnet den Steckbrief des Doppelgängers.
+      if (ev.target.closest("button, a, input, textarea, select, label, .card-img, [data-info]")) return;
       if (card.querySelector("[data-cond-row], [data-cart-row]")) return;
       openSuggestModal(items[i]);
     });
@@ -4819,7 +5713,7 @@ function collCardDetails(it) {
           ${it.bricklink_url ? `<a class="mini-btn link" href="${esc(it.bricklink_url)}" target="_blank" rel="noopener">BrickLink ↗</a>` : ""}
           ${it.item_type === "set" ? bauanleitungLink(it.item_id) : ""}
         </div>` : ""}
-        ${it.item_type === "set" && state.bricklinkPrices ? `
+        ${it.item_type === "set" && !/^(manuell-|custom-)/.test(it.item_id) ? `
         <div class="detail-row">
           <button class="mini-btn" data-figs>👥 Enthaltene Figuren anzeigen</button>
         </div>
@@ -4844,12 +5738,21 @@ function collCardDetails(it) {
   // Ohne Zugang bleibt das Blatt leer – dann darf es auch keinen Reiter
   // geben. Die Felder stehen trotzdem im Dokument (siehe unten), sonst
   // schriebe die Verdrahtung ins Leere.
-  const preise = hatPreise
+  // Sets bekommen das Blatt immer: UVP und Brickmerge-Preis stehen dort
+  // (`setdatenEinsetzen` füllt `[data-set-preise]`), auch ohne Zugang.
+  const neupreis = it.item_type === "set"
+    && !/^(custom-|manuell-)/.test(it.item_id || "");
+  // **↻ nur bei BrickLink.** Mit dem Preisdienst holt die Instanz einmal am
+  // Tag den ganzen Abzug; der Knopf läse nur denselben Stand noch einmal
+  // und tat sichtbar nichts (10.10.2026).
+  const auffrischen = hatPreise && state.preisquelle !== "hub";
+  const preise = hatPreise || neupreis
     ? `<div class="sb-preisblatt">
-        <button class="icon-btn" data-price
+        ${neupreis ? `<div class="sb-neupreis" data-set-preise></div>` : ""}
+        ${hatPreise ? `${auffrischen ? `${neupreis ? `<div class="sb-preis-zeile">` : ""}<button class="icon-btn" data-price
           title="${esc(tr("Preise jetzt aktualisieren"))}"
-          aria-label="${esc(tr("Preise jetzt aktualisieren"))}">↻</button>
-        ${preisfelder}
+          aria-label="${esc(tr("Preise jetzt aktualisieren"))}">↻</button>${neupreis ? `</div>` : ""}` : ""}
+        ${preisfelder}` : ""}
       </div>`
     : "";
 
@@ -4900,7 +5803,7 @@ function collCardHtml(it) {
         <img class="card-img" src="${imgSrc(it.img_url, true)}" data-gid="${esc(it.item_id)}" data-gtype="${esc(it.item_type || "minifig")}" alt="" loading="lazy">
         <span class="qty-badge" data-qty-val>${it.quantity}</span>
         <div class="card-title">
-          <strong>${esc(it.name)}</strong>
+          <strong>${esc(nameAnzeige(it))}</strong>
           <div class="sub" data-sub-id>${esc(collSubId(it))}</div>
           <div class="sub" data-sub>${esc(collSubMeta(it))}</div>
           ${setFigsText(it) ? `<div class="sub sub-figs">${esc(setFigsText(it))}</div>` : ""}
@@ -5894,9 +6797,10 @@ function katDetail(e) {
            Fassung: Bei 180 px Anzeige sieht man keinen Unterschied, aber
            der Browser hat das Bild schon und lädt kein zweites. -->
       <img class="kat-modal-bild" src="${imgSrc(e.img_url, true)}" alt="">
-      <strong class="kat-modal-name">${esc(e.name || e.item_no)}${
+      <strong class="kat-modal-name"><span data-setname>${esc(e.name || e.item_no)}</span>${
         jedipediaLink(e.item_no, e.name)}</strong>
       <div class="sub">${esc(e.item_no)}${e.jahr ? " · " + e.jahr : ""}</div>
+      ${katStand.art === "set" ? `<div class="sb-setdaten" data-setdaten hidden></div>` : ""}
       ${state.bricklinkPrices ? `<div class="price-result kat-modal-preise" data-kat-preise>
         <span class="price-note">${esc(tr("Lade Preise …"))}</span></div>` : ""}
       <div class="kat-modal-tasten">
@@ -5921,6 +6825,9 @@ function katDetail(e) {
   document.addEventListener("keydown", taste);
   // Preise wie im Steckbrief (seit 2.90.17) – dieselben Bausteine. Kommt
   // nichts, verschwindet der Platzhalter wieder, statt ewig zu „laden“.
+  if (katStand.art === "set") {
+    setdatenEinsetzen(overlay.querySelector("[data-setdaten]"), e.item_no);
+  }
   const katPreise = overlay.querySelector("[data-kat-preise]");
   if (katPreise) {
     preiseVollLaden(katPreise, katStand.art === "set" ? "set" : "minifig",
@@ -5944,6 +6851,250 @@ function katDetail(e) {
   // Ohne diese Kennzeichnung stünde das Popup in jedem Fehlerbericht als
   // „fremdes Element" – als hätte eine Browser-Erweiterung es eingehängt.
   document.body.appendChild(alsEigenMerken(overlay));
+}
+
+/* Teile, Figuren und Jahr eines Sets als Kacheln, darunter die Themenwelt.
+
+   Anlass: Sven wollte bei Sets sehen, was jede Händlerseite zeigt –
+   Teileanzahl, Themenwelt, Erscheinungsjahr (10.10.2026). Die Angaben
+   kommen aus der Setdatei des Katalogdienstes (Rebrickable), nicht von
+   BrickLink; die Instanz braucht dafür keinen Schlüssel.
+
+   **Eine ruhige Zeile, keine Kacheln.** Bis 3.9.7 standen vier Kacheln wie
+   Bezahlt/Wert/Gewinn darunter, gleich groß wie die eigenen Zahlen – „die
+   eckdaten [sind] irgendwie ganz schön zu präsent“ (10.10.2026).
+   Jetzt kleine gedämpfte Schrift, wie die Unterzeile im Kopf; iOS gleich.
+   Erscheinungsmonat und EOL stehen in der Setdatei, die der Katalogdienst
+   von Brickmerge füllt („erscheinung und eol sind schon sehr wichtig“); sonst bleibt es beim
+   Jahr. Was die Quelle selbst nur schätzt, steht mit „≈“ da.
+
+   Kennt die Datei das Set nicht – eigene Sets, eine Instanz ohne Datei –,
+   bleibt der Platz leer, ohne Hinweis: Fehlen tut dann nichts, was vorher
+   da war. */
+function setdatenHtml(d, mitThema = false) {
+  // Monat „JJJJ-MM“ → „07/2000“, wie auf den Händlerseiten. Beim EOL
+  // kommt oft nur ein Jahr („Ende 2028“) – das bleibt, wie es ist.
+  const monat = (m) => m.length > 4 ? `${m.slice(5, 7)}/${m.slice(0, 4)}` : m;
+  // **EOL nur, wo die Quelle ein Datum kennt.** Fehlt es, heißt das nicht
+  // „noch erhältlich“ – bei Sets vor etwa 2010 weiß es schlicht niemand.
+  // Ein Datum in der Zukunft ist das angekündigte Ende, „≈“ ein geschätztes.
+  // Nur ein Jahr: Das laufende Jahr gilt noch als „läuft aus“ – „Ende
+  // 2026“ ist im Oktober 2026 noch nicht vorbei.
+  const nurJahr = !!d.eol && d.eol.length === 4;
+  const heute = new Date().toISOString().slice(0, nurJahr ? 4 : 7);
+  const kommt = nurJahr ? d.eol >= heute : d.eol > heute;
+  const eol = d.eol ? (d.eol_geschaetzt ? "≈ " : "") + monat(d.eol) : "";
+  const erschienen = d.erschienen ? monat(d.erschienen)
+    : d.jahr > 0 ? String(d.jahr) : "";
+  const zahlen = [
+    d.teile > 0 ? tr("{n} Teile", { n: d.teile.toLocaleString(dateLocale()) }) : "",
+    d.figuren > 0 ? tr("{n} Figuren", { n: d.figuren }) : "",
+  ].filter(Boolean);
+  const daten = [
+    erschienen ? tr("erschienen {datum}", { datum: erschienen }) : "",
+    eol ? tr(kommt ? "läuft aus {datum}" : "EOL {datum}", { datum: eol }) : "",
+  ].filter(Boolean);
+  // Das Thema steht im Steckbrief schon im Kopf; hier nur, wenn ein
+  // Unterthema dazukommt – oder im Katalogfenster, das keins zeigt.
+  const thema = (mitThema || d.unterthema)
+    ? [d.thema, d.unterthema].filter(Boolean).join(" · ") : "";
+  const zeilen = [zahlen.join(" · "), daten.join(" · "), thema].filter(Boolean);
+  if (!zeilen.length) return "";
+  return `<div class="sb-eckdaten">${
+    zeilen.map((z) => `<div>${esc(z)}</div>`).join("")}</div>`;
+}
+
+/* UVP und Brickmerge-Preis gehören auf das Blatt „Preise“ („die
+   PreiseUVP und brickmerge, würde ich in den entsprechenden reiter mit
+   rein machen“, 10.10.2026). Im Katalogfenster gibt es keine
+   Blätter; dort stehen sie unter den Eckdaten.
+
+   Der Preis gehört Brickmerge, also steht die Quelle dabei, und die Zeile
+   ist der Link dorthin. Ohne Preis (ausgelaufen, Abruf fehlgeschlagen)
+   fällt die Zeile ganz weg. */
+function setpreiseHtml(d) {
+  const euro = (v) =>
+    v.toLocaleString(dateLocale(), { style: "currency", currency: "EUR" });
+  const zeile = (label, wert) => `
+      <div class="sb-np-zeile"><span class="sb-label">${esc(tr(label))}</span>
+        <span>${wert}</span></div>`;
+  return [
+    d.uvp_eur > 0 ? zeile("UVP", esc(euro(d.uvp_eur))) : "",
+    // Nur mit Zustimmung (Einstellungen → Angebotspreise) **und nur mit
+    // Preis**: Ohne Angebot dort steht kein bloßer „ansehen“-Link mehr
+    // (13.10.2026: „Brickmerge bitte nur anzeigen, wenn auch ein
+    // Preis … vorhanden ist“).
+    d.brickmerge_url && state.brickmergePreise && d.ab_eur > 0
+      ? zeile("Bei Brickmerge", `<a href="${esc(d.brickmerge_url)}"
+        target="_blank" rel="noopener">${esc(tr("ab {preis}", { preis: euro(d.ab_eur) }))} ↗</a>`)
+      : "",
+  ].join("");
+}
+
+/* Alles aus der Setdatei des Katalogdienstes: Teile, Figuren, Erscheinung,
+   EOL, UVP und Brickmerges Setbilder. Bis 3.9.11 holte der Server dafür
+   beim Öffnen die Brickmerge-Seite; seit 3.9.12 fragt nur noch der
+   Katalogdienst („die setdaten ziehen wir uns selber und diese werden im
+   katalog hinterlegt“, Sven). Nach draußen geht beim Öffnen nur noch die
+   Frage nach Brickmerges Angebotspreis – und die nur, wenn er unter
+   „Mehr → Angebotspreise“ eingeschaltet ist. */
+async function setdatenEinsetzen(ziel, nr, mitThema = null) {
+  if (!ziel || /^(custom-|manuell-)/.test(nr)) return;
+  const [sd, bm] = await Promise.all([
+    api(`/setdaten/${encodeURIComponent(nr)}`).catch(() => null),
+    state.brickmergePreise
+      ? api(`/brickmerge/${encodeURIComponent(nr)}`).catch(() => null)
+      : null,
+  ]);
+  if (!ziel.isConnected) return;
+  const d = sd && sd.bekannt ? { ...sd } : {};
+  if (bm && bm.url) {
+    d.brickmerge_url = bm.url;
+    d.ab_eur = bm.ab_eur;
+  }
+  if (state.brickmergeBilder) setbilderEinsetzen(ziel, d.bilder || []);
+  const karte = ziel.closest(".card-modal");
+  // Deutscher Setname, wo der Katalog einen kennt; der englische bleibt
+  // als Hinweis beim Draufzeigen. Auf Englisch bleibt es beim englischen.
+  const name = karte && karte.querySelector("[data-setname]");
+  if (name && sd && sd.name_de && state.lang !== "en"
+      && name.textContent !== sd.name_de) {
+    name.title = name.textContent;
+    name.textContent = sd.name_de;
+  }
+  const blatt = karte && karte.querySelector("[data-set-preise]");
+  const preise = setpreiseHtml(d);
+  if (blatt) blatt.innerHTML = preise;
+  const html = setdatenHtml(d, mitThema ?? !blatt)
+    + (!blatt && preise ? `<div class="sb-neupreis">${preise}</div>` : "");
+  if (!html) return;
+  ziel.innerHTML = html;
+  ziel.hidden = false;
+}
+
+/* Brickmerges weitere Setbilder als Reihe unter dem großen Bild.
+
+   „brickmerge hat auch die Bilder der sets. könnte man diese auch anzeigen
+   lassen?“ (10.10.2026). **Rebrickables Bild bleibt das Hauptbild** –
+   es steht in der Sammlung und ist frei nutzbar. Die Liste der Bilder kommt
+   mit der Setdatei des Katalogdienstes; deren erstes ist dasselbe
+   Produktfoto und wird nur genommen, wenn das Set gar keins hat.
+
+   **Direkt von Brickmerge, nur auf Wunsch.** Bis 3.9.12 holte der eigene
+   Server die Bilder und behielt eine Kopie. Sven: „Die Bilder bitte nicht
+   mit ziehen, diese sollen von dort aus geöffnet werden. Aber auch
+   abschaltbar bitte.“ Jetzt lädt der Browser sie bei brickmerge.de –
+   ohne Absenderadresse (`no-referrer`), damit Brickmerge die eigene
+   Instanz nicht erfährt –, und nur mit „Setbilder von Brickmerge zeigen“
+   (voreingestellt aus). Aus heißt: keine Reihe, keine Anfrage dort.
+
+   **Ein Tipp öffnet die Großansicht mit allen Bildern zum Wischen.** Bis
+   3.9.7 tauschte er nur das Bild im Steckbrief: Wer Bilder groß sehen
+   wollte, musste schließen, das nächste wählen und wieder öffnen („ich
+   kann die Bilder nicht durchswipen“, Sven). Das große Bild trägt die
+   Reihe ebenfalls (`data-bilder`), damit auch sein Tipp alle zeigt. */
+function setbilderEinsetzen(ziel, bilder) {
+  const karte = ziel.closest(".card-modal");
+  const gross = karte
+    && karte.querySelector(".sb-bild, .kat-modal-bild, [data-setbild]");
+  // Nur Brickmerges Bildordner: Die Adresse geht ungefiltert an den Browser.
+  bilder = bilder.filter((u) => u.startsWith(BRICKMERGE_BILDER));
+  if (!gross || !bilder.length) return;
+  const ohneBild = gross.getAttribute("src") === IMG_PLACEHOLDER
+    || (gross.complete && !gross.naturalWidth);
+  if (ohneBild) {
+    gross.referrerPolicy = "no-referrer";
+    gross.src = bilder[0];
+  }
+  const reihe = [gross.getAttribute("src"), ...bilder.slice(1)];
+  if (reihe.length < 2) return;
+  const voll = reihe.map((src) => imgGross(src));
+  gross.dataset.bilder = JSON.stringify(voll);
+  const leiste = document.createElement("div");
+  leiste.className = "sb-galerie";
+  leiste.innerHTML = reihe.map((src, i) => `
+    <button class="sb-galerie-bild" data-bild="${i}"
+      aria-label="${esc(tr("Bild {n}", { n: i + 1 }))}">
+      <img src="${esc(src)}" alt="" loading="lazy" referrerpolicy="no-referrer"></button>`).join("");
+  leiste._voll = voll;
+  leiste.addEventListener("click", (ev) => {
+    const b = ev.target.closest("[data-bild]");
+    if (!b) return;
+    ev.stopPropagation();
+    galerieMarkieren(leiste, Number(b.dataset.bild));
+    openGallery(voll[Number(b.dataset.bild)], gross.dataset.gid,
+      gross.dataset.gtype, voll);
+  });
+  // Unter die Bühne, im Suchtreffer unter den Kopf (dort sitzt das Bild
+  // klein neben dem Namen), im Katalogfenster direkt unters Bild.
+  (gross.closest(".sb-buehne") || (gross.matches("[data-setbild]")
+    && gross.closest(".card-head")) || gross).after(galerieBlaettern(leiste));
+}
+
+/* Die Bilderreihe blätterbar machen: ‹ › an den Enden, Mausrad und
+   Trackpad quer. Bei zehn Bildern war die Reihe am Desktop rechts
+   abgeschnitten, und nichts zeigte, dass es weitergeht (11.10.2026).
+   Wischen geht am Handy ohnehin (`overflow-x: auto`). Die Pfeile stehen nur
+   da, wo es in ihre Richtung noch etwas zu sehen gibt. */
+function galerieBlaettern(leiste) {
+  const huelle = document.createElement("div");
+  huelle.className = "sb-galerie-huelle";
+  const pfeil = (richtung, zeichen, text) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "sb-galerie-pfeil " + richtung;
+    b.textContent = zeichen;
+    b.setAttribute("aria-label", text);
+    b.hidden = true;
+    b.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      const schritt = Math.max(60, leiste.clientWidth * 0.8);
+      leiste.scrollBy({ left: richtung === "links" ? -schritt : schritt,
+                        behavior: "smooth" });
+    });
+    return b;
+  };
+  const links = pfeil("links", "‹", tr("Vorherige Bilder"));
+  const rechts = pfeil("rechts", "›", tr("Weitere Bilder"));
+  const pruefen = () => {
+    const rest = leiste.scrollWidth - leiste.clientWidth - leiste.scrollLeft;
+    links.hidden = leiste.scrollLeft <= 2;
+    rechts.hidden = rest <= 2;
+  };
+  leiste.addEventListener("scroll", pruefen, { passive: true });
+  leiste.addEventListener("wheel", (ev) => {
+    if (Math.abs(ev.deltaY) <= Math.abs(ev.deltaX)) return;   // schon quer
+    const max = leiste.scrollWidth - leiste.clientWidth;
+    if (max <= 0) return;
+    const ziel = leiste.scrollLeft + ev.deltaY;
+    // Am Ende darf das Rad wieder die Seite bewegen.
+    if ((ev.deltaY < 0 && leiste.scrollLeft <= 0)
+        || (ev.deltaY > 0 && leiste.scrollLeft >= max)) return;
+    ev.preventDefault();
+    leiste.scrollLeft = Math.max(0, Math.min(max, ziel));
+  }, { passive: false });
+  if (typeof ResizeObserver !== "undefined") {
+    new ResizeObserver(pruefen).observe(leiste);
+  }
+  leiste.querySelectorAll("img").forEach((img) =>
+    img.addEventListener("load", pruefen, { once: true }));
+  huelle.append(links, leiste, rechts);
+  requestAnimationFrame(pruefen);
+  return huelle;
+}
+
+/* Bild `i` der Reihe hervorheben und in den sichtbaren Bereich holen. */
+function galerieMarkieren(leiste, i) {
+  const knoepfe = leiste.querySelectorAll(".sb-galerie-bild");
+  knoepfe.forEach((k, j) => k.classList.toggle("an", j === i));
+  const k = knoepfe[i];
+  if (!k) return;
+  const links = k.offsetLeft - leiste.offsetLeft;
+  if (links < leiste.scrollLeft
+      || links + k.offsetWidth > leiste.scrollLeft + leiste.clientWidth) {
+    leiste.scrollTo({ left: links - (leiste.clientWidth - k.offsetWidth) / 2,
+                      behavior: "smooth" });
+  }
 }
 
 /* Detailansicht als Popup. Enthält Kopf UND Details, damit die bestehende
@@ -5978,7 +7129,7 @@ function openCardModal(item, id, listCard, deleteEntry, wireQty, canPrice) {
             </div>
           </div>
           <div class="card-title">
-            <strong>${esc(item.name)}${
+            <strong><span data-setname>${esc(item.name)}</span>${
               jedipediaLink(item.item_id, item.name)}</strong>
             <div class="sub" data-sub-id>${esc(collSubId(item))}</div>
             <div class="sub" data-sub>${esc(collSubMeta(item))}</div>
@@ -5986,6 +7137,7 @@ function openCardModal(item, id, listCard, deleteEntry, wireQty, canPrice) {
             ${setFigsText(item) ? `<div class="sub sub-figs">${esc(setFigsText(item))}</div>` : ""}
             ${(item.in_sets || item.item_type === "minifig") ? `<div class="sub in-sets" data-fig-sets hidden></div>` : ""}
           </div>
+          ${item.item_type === "set" ? `<div class="sb-setdaten" data-setdaten hidden></div>` : ""}
           ${steckbriefKopfzahlen(item)}
         </div>
         ${collCardDetails(item)}
@@ -6000,6 +7152,9 @@ function openCardModal(item, id, listCard, deleteEntry, wireQty, canPrice) {
   wireCollectionDetails(inner, item, id, deleteEntry, wireQty);
   // „Kommt vor in"-Sets (eigene sofort, alle von BrickLink nach)
   renderFigSets(inner, item);
+  if (item.item_type === "set") {
+    setdatenEinsetzen(inner.querySelector("[data-setdaten]"), item.item_id);
+  }
   if (canPrice) loadEntryPrice(inner, item, false);
 
   const done = () => {
@@ -6682,7 +7837,7 @@ function wireCollectionDetails(card, item, id, deleteEntry, wireQty) {
       imgBtn.classList.add("spin");
       try {
         const found = await api(`/lookup/${item.item_type}/`
-          + encodeURIComponent(item.item_id));
+          + encodeURIComponent(item.item_id) + "?frisch=1");
         if (!found.img_url) {
           toast("BrickLink hat zu dieser Nummer kein Bild");
           return;
@@ -6710,11 +7865,14 @@ async function loadEntryPrice(card, item, refresh) {
     const zusatz = [];
     if (refresh) zusatz.push("refresh=1");
     if (state.angebote) zusatz.push("angebote=1");
+    // Bei älteren Preisen prüft der Server die Quelle erneut. Im Hub-Modus
+    // kann das bei Sets den letzten Stand liefern, bis ein neuerer bereitsteht.
     const p = await api(`/collection/${item.id}/price`
       + (zusatz.length ? "?" + zusatz.join("&") : ""));
-    if (!refresh && !p.updated_at) {
-      // frisch erfasste Figur, Hintergrund-Abruf noch nicht durch → einmal live holen
-      return loadEntryPrice(card, item, true);
+    if (!(p.new && p.new.avg != null) && !(p.used && p.used.avg != null)) {
+      out.innerHTML = `<div class="price-note">${esc(keinPreisSatz(true))}</div>`
+        + preisBeiBrickLink(item);
+      return;
     }
     const stand = p.updated_at
       ? new Date(p.updated_at * 1000).toLocaleDateString(dateLocale()) : "";
@@ -6732,6 +7890,7 @@ async function loadEntryPrice(card, item, refresh) {
     // Frische Preise sofort in Karte und Rechnung übernehmen
     if (p.new && p.new.avg != null) item.price_new = p.new.avg;
     if (p.used && p.used.avg != null) item.price_used = p.used.avg;
+    if (p.updated_at) item.price_updated_at = p.updated_at;
     const subEl = card.querySelector("[data-sub]");
     if (subEl) subEl.textContent = collSubMeta(item);
     const profitEl = card.querySelector("[data-profit]");
@@ -6739,7 +7898,8 @@ async function loadEntryPrice(card, item, refresh) {
     if (refresh) updateStatsOnly();   // Wert-Widget mitziehen
     loadPriceHistory(card, item);
   } catch (e) {
-    out.textContent = e.message;
+    out.innerHTML = `<div class="price-note">${esc(e.message)}</div>`
+      + preisBeiBrickLink(item);
   }
 }
 
@@ -7239,15 +8399,26 @@ async function runCatalogSearch() {
     const data = await api(`/search?q=${encodeURIComponent(q)}`
       + `&item_type=${type}&page=1`);
     if (seq !== searchSeq) return;   // Ergebnis einer überholten Suche verwerfen
-    suggestState = { q, type, page: 1, items: data.items || [],
-                     count: data.count || (data.items || []).length,
+    // Nichts unter dem gewählten Typ, aber unter einem anderen? Dann die
+    // zeigen – „Supersternzerstörer" bei Minifigur fand sonst nichts, und
+    // dass man erst auf „Set" umstellen muss, sah man nicht (10.10.2026).
+    // `takeSuggestion` stellt den Typ beim Übernehmen selbst um.
+    const andere = (!(data.items || []).length && data.andere) || [];
+    suggestState = { q, type, page: 1,
+                     items: andere.length ? andere : (data.items || []),
+                     count: andere.length || data.count || (data.items || []).length,
                      // Hat **unser** Abzug etwas gefunden, oder kommt alles
                      // von Rebrickable? Danach entscheidet sich, ob die
                      // KI-Übersetzung noch drankommt.
-                     eigeneLeer: !!data.eigene_leer,
+                     eigeneLeer: !andere.length && !!data.eigene_leer,
                      gezeigt: SEITE,
-                     hasMore: !!data.has_more };
+                     hasMore: !andere.length && !!data.has_more };
     zeigeSuggestSeite();
+    if (andere.length) {
+      hint.textContent = andereTypenHinweis(andere);
+      hint.hidden = false;
+      return;
+    }
     // **Nur bei Treffern** wegnehmen. `renderSuggestions` setzt bei leerer
     // Liste selbst „Nichts gefunden …" – ein pauschales Ausblenden löschte
     // genau diese Meldung eine Zeile später wieder, und die Suche endete
@@ -7270,6 +8441,17 @@ async function runCatalogSearch() {
     if (seq !== searchSeq) return;
     hint.textContent = e.message;
   }
+}
+
+/* Überschrift für Treffer unter einem anderen Typ: „Als Set gefunden:". */
+function andereTypenHinweis(items) {
+  const typen = [...new Set(items.map((i) => i.item_type))];
+  if (typen.length !== 1) {
+    return tr("Unter einem anderen Typ gefunden – Übernehmen stellt den Typ um:");
+  }
+  return { set: tr("Als Set gefunden:"), part: tr("Als Teil gefunden:"),
+           minifig: tr("Als Minifigur gefunden:") }[typen[0]]
+    || tr("Unter einem anderen Typ gefunden – Übernehmen stellt den Typ um:");
 }
 
 /* Die Meldung, mit der eine erfolglose Suche endet.
@@ -7432,6 +8614,10 @@ function renderSuggestions(items, meta = {}) {
   if (moreBtn) moreBtn.addEventListener("click", loadMoreSuggestions);
 
   enrichSuggestions(items, meta.detailVon || 0);
+  // Wie unter dem Scan-Treffer: Sven suchte am 10.10.2026 sw1422 unter
+  // „Manuell erfassen" und bekam keinen Hinweis auf sw1423 – den gab es
+  // bis dahin nur beim Fotografieren.
+  scanDoppelgaenger(box, items);
   wireWantButtons(box, items);
   wireCartButtons(box, items);
 
@@ -7445,7 +8631,7 @@ function renderSuggestions(items, meta = {}) {
   box.querySelectorAll("[data-sug-id]").forEach((card, i) => {
     card.classList.add("tappable");
     card.addEventListener("click", (ev) => {
-      if (ev.target.closest("button, a, input, textarea, select, label, .card-img")) return;
+      if (ev.target.closest("button, a, input, textarea, select, label, .card-img, [data-info]")) return;
       if (card.querySelector("[data-cart-row]")) return;
       openSuggestModal(items[i]);
     });
@@ -7535,8 +8721,10 @@ function openSuggestModal(it) {
   const canParts = state.bricklinkPrices && isMini
     && (!/^(fig-|manuell-|custom-)/.test(pit.item_id) || resolvable);
   // Bei Sets andersherum: die enthaltenen Figuren zeigen
-  const canFigs = state.bricklinkPrices && type === "set"
-    && !/^manuell-/.test(pit.item_id);
+  // Ohne Preis-Schalter (3.9.3): Die Figuren kommen aus der Setdatei,
+  // dafür braucht es weder BrickLink noch den Preisdienst.
+  const canFigs = type === "set"
+    && !/^(manuell-|custom-)/.test(pit.item_id);
   const overlay = document.createElement("div");
   overlay.className = "card-modal-overlay";
   overlay.id = "card-modal";
@@ -7546,15 +8734,17 @@ function openSuggestModal(it) {
       <div class="card modal-inner open" role="dialog" aria-modal="true">
         <div class="card-head">
           <div class="card-img-wrap">
-            <img class="card-img" src="${imgSrc(pit.img_url, true)}" data-gid="${esc(pit.item_id)}" data-gtype="${esc(type)}" alt="">
+            <img class="card-img"${canFigs ? " data-setbild" : ""} src="${imgSrc(pit.img_url, true)}" data-gid="${esc(pit.item_id)}" data-gtype="${esc(type)}" alt="">
           </div>
           <div class="card-title">
-            <strong>${esc(pit.name)}</strong>
+            <strong><span data-setname>${esc(pit.name)}</span></strong>
             <div class="sub" data-sug-meta>${esc(pit.item_id)}${pit.year > 0 ? " · " + pit.year : ""}</div>
             <span class="badge badge-owned" data-sug-owned hidden></span>
+            ${canFigs ? `<div class="sb-setdaten sug-setdaten" data-setdaten hidden></div>` : ""}
           </div>
         </div>
         <div class="card-details">
+          ${canFigs ? `<div class="sb-neupreis" data-set-preise></div>` : ""}
           ${state.bricklinkPrices ? `<div class="sug-prices" data-sug-prices><span class="price-note">Lade Details …</span></div>` : ""}
           ${isMini ? `<div class="sub in-sets" data-fig-sets hidden></div>` : ""}
           ${canParts ? `
@@ -7617,6 +8807,13 @@ function openSuggestModal(it) {
       b.textContent = tr("⭐ Gemerkt");
     } catch (e) { toast(e.message); } finally { b.disabled = false; }
   });
+  // Sets: dieselben Eckdaten, Bilder und Preiszeilen wie im Steckbrief
+  // („bei der suche sollten schon ein bisschen mehr daten im steckbrief
+  // stehen“, 10.10.2026) – derselbe Baustein, damit beide nicht
+  // auseinanderlaufen. Das Thema mit, der Kopf zeigt hier keins.
+  if (canFigs) {
+    setdatenEinsetzen(inner.querySelector("[data-setdaten]"), pit.item_id, true);
+  }
   loadSuggestDetail(inner, pit, it);
 }
 
@@ -7718,7 +8915,8 @@ async function loadSuggestDetail(inner, pit, orig) {
       ? `<span class="sug-price-label">Marktpreis</span> ${parts.join(" · ")}`
       : `<span class="price-note">${/^fig-/.test(pit.item_id)
           ? "Keine BrickLink-Nummer gefunden – Preise erst nach dem Übernehmen."
-          : "Keine Preisdaten bei BrickLink."}</span>`;
+          : esc(keinPreisSatz(true))}</span> ${
+          /^fig-/.test(pit.item_id) ? "" : preisBeiBrickLink(pit)}`;
     // Die Kurzzeile steht sofort (aus dem Zwischenspeicher der Trefferliste),
     // die vollen Preise kommen gleich hinterher.
     if (parts.length && !/^(fig-|manuell-|custom-)/.test(pit.item_id)) {
@@ -7727,6 +8925,14 @@ async function loadSuggestDetail(inner, pit, orig) {
   }
 
   if (type === "minifig") renderFigSets(inner, pit);
+  const vorAktionen = inner.querySelector(".card-actions");
+  if (type === "minifig") {
+    teilFuerTeilAnbieten(vorAktionen, pit, null, () => {
+      const w = inner.querySelector("[data-sug-want]");
+      if (w) w.textContent = tr("⭐ Gemerkt");
+    });
+  }
+  if (type === "part") inFigurenAnbieten(vorAktionen, pit.item_id, pit.color_id);
 }
 
 /* Die Preise im Infofenster eines Suchtreffers so wie im Steckbrief: neu
@@ -7754,9 +8960,12 @@ async function preiseVollLaden(pr, type, itemId) {
     ? `<div class="price-note">${esc(tr("BrickLink-Nr. {nr}", { nr: p.bl_no }))}</div>`
     : "";
   pr.classList.add("voll");
+  // Älter als 48 Stunden: der Server nennt den Stand (3.9.31).
+  const stand = (p.new && p.new.stand) || (p.used && p.used.stand) || "";
   pr.innerHTML = priceLine(tr("Neu"), p.new) + priceLine(tr("Gebraucht"), p.used)
     + `<div class="price-note">`
-    + esc(tr("Ø-Verkaufspreise, letzte 6 Monate (BrickLink)")) + `</div>`
+    + esc(tr("Ø-Verkaufspreise, letzte 6 Monate (BrickLink)"))
+    + `${stand ? esc(tr(" · Stand {d}", { d: stand })) : ""}</div>`
     + angebotBlock(p.stock) + zweit;
   return true;
 }
@@ -7896,13 +9105,29 @@ async function loadApiKeys() {
     // gezeigt: Sie steht ohnehin sichtbar unter »Rechtliches«, und ein
     // maskiertes Feld liesse sich nicht mehr leeren.
     $("k-kontakt").value = state.betreiberKontakt || "";
+    kontaktZeigen();
   } catch (e) { toast(e.message); }
+}
+
+/* Die Kontaktadresse verlangen nur BrickLinks API-Bedingungen. Ohne eigenen
+   Zugang bleibt das Feld weg – es sei denn, es steht noch etwas darin, das
+   man löschen können muss. */
+function kontaktZeigen() {
+  const block = $("kontakt-block");
+  // `bricklinkLookup`, nicht `bricklinkPrices`: Seit dem Preisdienst gibt es
+  // Preise auch ohne Schlüssel, und dann nutzt die Instanz BrickLinks API
+  // gar nicht.
+  if (block) block.hidden = !state.bricklinkLookup && !state.betreiberKontakt;
 }
 
 /** Traegt den Pflichthinweis und den Betreiber unter »Rechtliches« ein. */
 function rechtlichesAktualisieren() {
+  kontaktZeigen();
+  // Der Pflichthinweis sagt „This application uses the BrickLink API“. Mit
+  // dem Preisdienst und ohne eigenen Schlüssel stimmt das nicht, also nur
+  // mit Schlüssel (3.9.0 zeigte ihn auch im Preisdienst-Betrieb).
   const block = $("bricklink-rechtliches");
-  if (block) block.hidden = !state.bricklinkPrices;
+  if (block) block.hidden = !state.bricklinkLookup;
   const zeile = $("betreiber-zeile");
   const wert = (state.betreiberKontakt || "").trim();
   if (zeile) {
@@ -7956,18 +9181,29 @@ async function saveApiKeys() {
     rechtlichesAktualisieren();
     toast(tr("Gespeichert ({n} Schlüssel) ✔", { n: geaendert }));
     loadApiKeys();
+    // Mit neuem Zugang ändert sich, was die Karte „Preise“ sagt.
+    loadPreisquelle();
+    loadPriceRegion();
   } catch (e) { toast(e.message); }
 }
 
-async function testApiKeys() {
-  const out = $("keys-status");
+/* Eine Zeile je Dienst. Den Preisdienst meldet der Server nur, wenn er
+   gewählt ist. */
+function testZeilen(r) {
+  const zeile = (name, t) => `${name}: ${t.ok ? "✅" : "❌"} ${t.anzahl != null
+    ? tr("{n} Preise geladen", { n: t.anzahl }) : tr(t.info)}`;
+  return [r.preisdienst && zeile(tr("Preisdienst"), r.preisdienst),
+    zeile("BrickLink", r.bricklink), zeile("Rebrickable", r.rebrickable)]
+    .filter(Boolean);
+}
+
+async function testApiKeys(outId = "keys-status") {
+  const out = $(typeof outId === "string" ? outId : "keys-status");
   out.textContent = tr("Teste Verbindungen …");
   out.hidden = false;
   try {
     const r = await api("/settings/test", { method: "POST" });
-    out.textContent =
-      `BrickLink: ${r.bricklink.ok ? "✅" : "❌"} ${r.bricklink.info} — ` +
-      `Rebrickable: ${r.rebrickable.ok ? "✅" : "❌"} ${r.rebrickable.info}`;
+    out.textContent = testZeilen(r).join(" — ");
   } catch (e) {
     out.textContent = e.message;
   }
@@ -7984,9 +9220,17 @@ async function loadOllama() {
     $("ollama-model-frei").value = d.model || "";
     $("ollama-model-frei").placeholder = d.default_model || "";
     state.kiSuche = !!d.enabled;
+    ollamaFelder();
     if (d.url) modelleLaden();          // ohne Adresse gibt es nichts zu holen
     begriffeBilanz();     // auch ohne KI: die eigenen Zeilen gelten trotzdem
   } catch (e) { /* kein Admin oder alte Fassung: Karte bleibt leer */ }
+}
+
+/* Modell und Test erst, wenn eine Adresse dasteht. */
+function ollamaFelder() {
+  const da = !!$("ollama-url").value.trim();
+  $("ollama-mehr").hidden = !da;
+  $("btn-test-ollama").hidden = !da;
 }
 
 /* Die Modelle vom Server holen und zur Wahl stellen.
@@ -8239,6 +9483,9 @@ async function katalogDateiLesen(ev) {
       + (d.uebersprungen
         ? " " + tr("({u} andere Artikel übersprungen)", { u: d.uebersprungen })
         : "");
+    // Auch als Meldung: Sind danach alle Namen da, blendet `katalogStand`
+    // den Block samt dieser Zeile aus.
+    toast(out.textContent);
     katalogStand();
     // Die Suche kann jetzt auch ohne Rebrickable etwas – das Kennzeichen
     // kommt vom Server und muss neu geholt werden.
@@ -8261,6 +9508,7 @@ async function katalogStand() {
   catch (e) { feld.textContent = ""; return; }
   const schalter = $("katalog-aktiv");
   if (schalter) schalter.checked = !!d.aktiv;
+  katalogWegeZeigen(d);
   if (!d.aktiv) {
     feld.textContent = d.figuren
       ? tr("Abgeschaltet · {n} Figuren liegen weiterhin bereit",
@@ -8282,20 +9530,49 @@ async function katalogStand() {
       d.geprueft_at * 1000).toLocaleString([], { dateStyle: "short",
       timeStyle: "short" }) }));
   }
-  // Die Namen fehlen am Anfang allen: Der veröffentlichte Abzug enthält sie
-  // nicht, jede Installation schlägt sie über ihren eigenen Zugang nach.
-  // Das gehört gesagt, sonst hält man es für einen Fehler.
-  if (d.ohne_namen) {
-    teile.push(d.hat_bricklink
-      ? tr("{n} Namen werden nach und nach nachgeschlagen – gefunden werden "
-           + "die Figuren trotzdem.", { n: d.ohne_namen })
-      : tr("{n} Namen fehlen – dafür wird ein BrickLink-Zugang gebraucht.",
-           { n: d.ohne_namen }));
-  }
   if (d.namen_fehler) teile.push(tr("Abgebrochen: {f}", { f: d.namen_fehler }));
   feld.textContent = teile.join(" ");
 }
 
+
+/* Die BrickLink-Wege der Katalogkarte nur, wenn sie etwas nachzuholen haben.
+
+   Bis 3.9.10 standen „Katalogdatei einlesen“ und „Kategorien holen“ für
+   alle da, auch ohne Zugang und mit längst vollständigem Katalog. Die
+   Datei bringt nur noch Figurennamen, die Kategorien nur das Thema von
+   Sets aus BrickLinks Sets.xml – alles andere liefert der Katalog selbst. */
+function katalogWegeZeigen(d) {
+  // Was ohne BrickLink mitkommt, mit Zahl: So sieht man, ob die Dateien
+  // neben dem Abzug angekommen sind, und nicht erst an einem leeren
+  // Steckbrief. Was (noch) fehlt, bleibt ungenannt.
+  const mit = $("katalog-mitgeliefert");
+  if (mit) {
+    const liste = [
+      d.figurteile && tr("{n} Teilelisten", { n: d.figurteile }),
+      d.setdaten && tr("{n} Set-Steckbriefe", { n: d.setdaten }),
+      d.setnamen && tr("{n} deutsche Setnamen", { n: d.setnamen }),
+    ].filter(Boolean);
+    mit.hidden = !d.aktiv || !liste.length;
+    mit.textContent = tr("Mitgeliefert: {liste}.", { liste: liste.join(", ") });
+  }
+  const namen = $("katalog-namen-block");
+  if (namen) {
+    namen.hidden = !d.aktiv || !d.ohne_namen;
+    $("katalog-namen-satz").textContent = tr("{n} Figuren haben noch keinen "
+      + "Namen. Die dürfen wir nicht mitliefern, das verbieten BrickLinks "
+      + "Bedingungen. Gefunden werden die Figuren trotzdem.",
+      { n: d.ohne_namen });
+    $("katalog-namen-weg").textContent = d.hat_bricklink
+      ? tr("Dein BrickLink-Zugang holt sie nach und nach. Sofort geht es mit "
+        + "BrickLinks Katalogdatei (My Account → Downloads → Catalog Items, "
+        + "Minifigures, XML).")
+      : tr("Mit eigenem BrickLink-Zugang (unter Preise) holt Nupplo sie nach "
+        + "und nach. Ohne Zugang geht es mit BrickLinks Katalogdatei: My "
+        + "Account → Downloads → Catalog Items, Minifigures, XML.");
+  }
+  const kat = $("katalog-kategorien-block");
+  if (kat) kat.hidden = !d.hat_bricklink || !d.sets_ohne_thema;
+}
 
 /* Welcher Name gilt – die Liste oder das Textfeld? */
 function ollamaModell() {
@@ -8883,7 +10160,7 @@ function listItemRow(it, dealer, verkauf = false) {
   <div class="fig-row tappbar ${it.done ? "done" : ""}" data-iid="${it.id}" data-zustand="${it.condition === "new" ? "new" : "used"}" data-info="${esc(it.item_type)}|${esc(it.item_id)}" data-info-name="${esc(it.name)}" data-info-img="${esc(it.img_url || "")}">
     <img class="card-img fig-img" src="${imgSrc(it.img_url, true)}" data-gid="${esc(it.item_id)}" data-gtype="${esc(it.item_type)}" alt="" loading="lazy">
     <div class="fig-info">
-      <strong>${esc(it.name)}</strong>
+      <strong>${esc(nameAnzeige(it))}</strong>
       <div class="sub">${esc(it.item_id)}${it.qty > 1 ? ` · ${it.qty}×` : ""} · ${it.condition === "new" ? tr("Neu") : tr("Gebraucht")}${prices ? " · " + prices : ""}${it.paid_price != null ? esc(verkauf ? tr(" · Erlös {sum}", { sum: fmtEur(it.paid_price) }) : tr(" · Einkauf {sum}", { sum: fmtEur(it.paid_price) })) : ""}</div>
       ${doneInfo}
       ${verkauf && it.im_netz && !it.done ? `<span class="badge badge-owned">${esc(tr("🤝 im Netz"))}</span>` : ""}
@@ -9628,8 +10905,8 @@ function renderMissingFigs(data) {
         fehlen noch Figuren-Namen und -Bilder (unten nur die Nummer zu sehen).</span>
       ${s.can_fetch
         ? `<button class="mini-btn" id="btn-mf-details">🔄 Namen &amp; Bilder nachladen</button>`
-        : `<span class="search-hint">Dafür wird ein BrickLink-Schlüssel benötigt
-            (Mehr → API-Schlüssel).</span>`}
+        : `<span class="search-hint">Dafür brauchst du einen eigenen
+            BrickLink-Zugang (Mehr → Preise).</span>`}
     </div>` : ""}
     <div class="set-figs">
       ${data.items.map((it, i) => `
@@ -10231,6 +11508,9 @@ function cfSnippet() {
 }
 
 function renderCfSnippet() {
+  const fertig = $("cf-ergebnis");
+  if (fertig) fertig.hidden = !$("cf-host").value.trim()
+    || !$("cf-token").value.trim();
   const el = $("cf-snippet");
   if (el) el.textContent = cfSnippet();
   const url = $("cf-url");
@@ -10252,6 +11532,733 @@ function initExternalAccess() {
       await kopieren(cfSnippet(), "Block kopiert ✔");
     });
   }
+}
+
+/* ---------------------------------------------------- Abgleich (Windows)
+   Nur in Nupplo für Windows: Die Sammlung liegt im Programm und gleicht
+   sich wahlweise mit der SE zu Hause ab, wie auf iPhone und Mac
+   (`backend/abgleich.py`). */
+let abgleichChallenge = "";
+let abgleichWired = false;
+
+function abgleichBlockUmziehen(inDenAssistenten) {
+  const block = $("abgleich-block");
+  if (!block) return;
+  const ziel = inDenAssistenten ? $("wiz-abgleich-platz") : $("abgleich-heimat");
+  if (block.parentElement !== ziel) ziel.appendChild(block);
+  if (inDenAssistenten) ladeAbgleich();
+}
+
+function abgleichFehler(text) {
+  $("abgleich-fehler").textContent = text || "";
+  $("abgleich-fehler").hidden = !text;
+}
+
+function abgleichWegZeigen() {
+  const weg = (document.querySelector('input[name="abgleich-weg"]:checked') || {}).value;
+  const verbunden = !$("abgleich-verbunden").hidden || !$("ordner-verbunden").hidden;
+  $("abgleich-se").hidden = weg !== "se" || verbunden;
+  $("abgleich-wolke").hidden = weg !== "wolke" || verbunden;
+}
+
+/* Ordnerauswahl gibt es nur im Fenster von Nupplo für Windows (pywebview);
+   im Browser tippt man den Pfad ein. Die Brücke kommt erst nach dem Laden
+   der Seite an, darum auch auf `pywebviewready` hören. */
+function ordnerWahlZeigen() {
+  const da = !!(window.pywebview && window.pywebview.api && window.pywebview.api.ordner_waehlen);
+  $("btn-ordner-waehlen").hidden = !da;
+}
+window.addEventListener("pywebviewready", () => { if ($("btn-ordner-waehlen")) ordnerWahlZeigen(); });
+
+/* ------------------------------------------- Live-Scanner (Windows)
+   Ein Bereich im Tab Scannen statt eines eigenen Programms (0.5.0, Sven
+   07.11.2026: „wie in der Mac-App … Komplett integriert.“). Das Beobachten
+   macht `backend/bildschirm.py`; löst es aus, holt die App das Bild und
+   schickt es durch `handlePhoto` – Erkennung und Treffer wie bei einem
+   hineingezogenen Foto. */
+let livescanWired = false;
+let livescanGesehen = 0;
+let livescanUhr = null;
+let livescanTonFaellig = false;
+// Verlauf der Erkennungen dieser Sitzung (wie `LiveVerlauf` in der
+// Mac-App). Nur im Speicher: Die Abzüge sind Bildschirmfotos und gehören
+// niemandem sonst.
+let livescanVerlauf = [];
+let livescanAktiv = null;
+const LIVESCAN_VERLAUF_MAX = 40;
+const LIVESCAN_NURFIGUREN_KEY = "bf_live_nurfiguren";
+const LIVESCAN_TON_KEY = "bf_live_ton";
+
+function livescanSchalter(key, vorgabe) {
+  try { const v = localStorage.getItem(key); return v === null ? vorgabe : v === "1"; }
+  catch (_) { return vorgabe; }
+}
+
+async function livescanLaden() {
+  const karte = $("livescan-karte");
+  if (!karte || !state.desktop || !state.token) return;
+  let s;
+  try { s = await api("/bildschirm"); } catch (_) { return; }
+  karte.hidden = !s.verfuegbar;
+  $("tab-live").hidden = !s.verfuegbar;
+  if (!s.verfuegbar) return;
+  if (!livescanWired) { livescanVerdrahten(); livescanGesehen = s.nummer; }
+  livescanZeigen(s);
+  if (s.an && !livescanUhr) livescanUhr = setInterval(livescanAbfragen, 700);
+}
+
+function livescanModus() {
+  return !$("view-scan").hidden && $("view-scan").classList.contains("live-modus");
+}
+
+function livescanZeigen(s) {
+  const b = s.bereich;
+  $("livescan-bereich").textContent = b
+    ? tr("Bereich: {b} × {h} Pixel.", { b: b[2], h: b[3] })
+    : tr("Noch kein Bereich gewählt.");
+  // Ist ein Bereich gemerkt, reicht die Knopfzeile – die Seite soll ohne
+  // Blättern Ergebnis, Preis und Knöpfe zeigen (Mac-App, 15.10.2026).
+  $("livescan-erklaerung").hidden = !!b;
+  $("btn-livescan-bereich").textContent = b ? tr("🔲 Neu wählen") : tr("🔲 Bereich wählen");
+  $("btn-livescan-an").disabled = !b;
+  $("btn-livescan-jetzt").disabled = !b;
+  $("btn-livescan-an").textContent = s.an ? tr("⏸ Automatik aus") : tr("▶ Automatik an");
+  $("livescan-stufe").value = s.stufe || "mittel";
+  $("livescan-stand").textContent = !s.an || !s.stand ? ""
+    : "⏱ " + tr(s.stand) + (s.grund ? " · " + tr(s.grund) : "");
+  $("livescan-fehler").hidden = !s.fehler;
+  $("livescan-fehler").textContent = s.fehler ? tr(s.fehler) : "";
+}
+
+/* Ausgelöste Bilder nur im Live-Scanner zeigen. Wer gerade in der
+   Sammlung ist, soll nicht herausgerissen werden; was er verpasst, ist
+   ohnehin vorbei – es zählt die Figur, die jetzt im Stream steht. */
+async function livescanAbfragen() {
+  let s;
+  try { s = await api("/bildschirm"); } catch (_) { return; }
+  livescanZeigen(s);
+  if (!s.an && livescanUhr) { clearInterval(livescanUhr); livescanUhr = null; }
+  if (s.nummer > livescanGesehen) {
+    livescanGesehen = s.nummer;
+    if (livescanModus()) await livescanBildHolen(s.an);
+  }
+}
+
+async function livescanBildHolen(automatisch) {
+  const r = await fetch("/api/bildschirm/bild", {
+    headers: { Authorization: "Bearer " + state.token }, cache: "no-store" });
+  if (!r.ok) return;
+  await livescanErkennen(await r.blob(), automatisch);
+}
+
+/* Erst fragen, dann zeigen. **Ein erfolgloser Abzug der Automatik ersetzt
+   den Treffer nicht** – so in der Mac-App: Wer gerade einen Preis
+   eintippt, dem nähme sonst das nächste leere Bild die Karte weg. */
+async function livescanErkennen(blob, automatisch) {
+  const datei = new File([blob], "live-scanner.png", { type: "image/png" });
+  const form = new FormData();
+  form.append("file", await verkleinern(datei), "scan.jpg");
+  let daten;
+  $("scan-status").hidden = false;
+  try { daten = await api("/scan", { method: "POST", body: form }); }
+  catch (e) { toast(e.message); return; }
+  finally { $("scan-status").hidden = true; }
+  const alle = daten.items || [];
+  let items = alle;
+  if (livescanSchalter(LIVESCAN_NURFIGUREN_KEY, false)) {
+    items = alle.filter((it) => (it.item_type || "minifig") === "minifig");
+    if (!items.length && alle.length) {
+      toast(tr("🧍 Nur Figuren: {n} Vorschläge waren keine Figur.", { n: alle.length }));
+    }
+  }
+  // Wie am Mac: drei Treffer, der beste vorn – im Stream zählt Tempo.
+  items = items.slice(0, 3);
+  if (!items.length && automatisch && livescanAktiv) return;
+  livescanTonFaellig = livescanSchalter(LIVESCAN_TON_KEY, true);
+  await handlePhoto(datei, { ...daten, items });
+  livescanKatalogZeigen(items[0]);
+  if (items.length) livescanFesthalten(blob, items, automatisch);
+}
+
+function livescanKatalogZeigen(it) {
+  const box = $("live-katalog");
+  box.hidden = !it;
+  if (!it) return;
+  $("live-katalog-bild").src = imgSrc(it.img_url, true);
+  $("live-katalog-text").textContent = `${it.item_id} · ${tr("{n} % sicher", { n: it.score })}`;
+}
+
+/* Dieselbe Figur hintereinander ist eine Zeile, nicht fünf – etwa auf dem
+   Drehteller. Behalten wird der deutlichste Abzug. */
+function livescanFesthalten(blob, items, automatisch) {
+  const oben = items[0];
+  const letzte = livescanVerlauf[0];
+  if (letzte && letzte.items[0].item_id === oben.item_id) {
+    livescanAnsichtDazu(letzte, blob, oben.score);
+    if (oben.score > letzte.items[0].score) letzte.items = items;
+    livescanAktiv = letzte.id;
+  } else {
+    const eintrag = { id: Date.now() + Math.random(), items, zeit: new Date(), automatisch,
+      ansichten: [], an: new Set(), beste: -1 };
+    livescanAnsichtDazu(eintrag, blob, oben.score);
+    livescanVerlauf.unshift(eintrag);
+    for (const alt of livescanVerlauf.splice(LIVESCAN_VERLAUF_MAX)) {
+      alt.ansichten.forEach((a) => URL.revokeObjectURL(a.url));
+    }
+    livescanAktiv = eintrag.id;
+  }
+  livescanVerlaufZeigen();
+  livescanAnsichtenZeigen();
+}
+
+/* Wie `ansicht_dazulegen` im Python-Scanner und `ansichtDazu` in der
+   Mac-App: höchstens sechs Ansichten je Figur; ist es voll, fliegt die
+   älteste **nicht angehakte**. Angehakt wird die neue nur, wenn die Figur
+   darin deutlicher war – auf dem Drehteller ist das meist die Vorderseite. */
+const LIVESCAN_ANSICHTEN_MAX = 6;
+
+function livescanAnsichtDazu(e, blob, score) {
+  e.ansichten.push({ blob, url: URL.createObjectURL(blob) });
+  if (e.ansichten.length > LIVESCAN_ANSICHTEN_MAX) {
+    let weg = e.ansichten.findIndex((_, i) => i < e.ansichten.length - 1 && !e.an.has(i));
+    if (weg < 0) weg = 0;
+    URL.revokeObjectURL(e.ansichten[weg].url);
+    e.ansichten.splice(weg, 1);
+    e.an = new Set([...e.an].filter((i) => i !== weg).map((i) => (i > weg ? i - 1 : i)));
+  }
+  if (score > e.beste) { e.an = new Set([e.ansichten.length - 1]); e.beste = score; }
+}
+
+function livescanEintrag() {
+  return livescanVerlauf.find((v) => v.id === livescanAktiv) || null;
+}
+
+/* Die Ansicht, für die ein Eintrag steht: die erste angehakte, sonst die
+   neueste. */
+function livescanTitelbild(v) {
+  const i = v.an.size ? Math.min(...v.an) : v.ansichten.length - 1;
+  return v.ansichten[i];
+}
+
+function livescanVerlaufZeigen() {
+  $("live-verlauf").hidden = !livescanVerlauf.length;
+  const uhr = (d) => d.toLocaleTimeString(lang === "en" ? "en-GB" : "de-DE",
+    { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  $("live-verlauf-liste").innerHTML = livescanVerlauf.map((v) => {
+    const it = v.items[0];
+    return `<button class="live-verlauf-zeile${v.id === livescanAktiv ? " aktiv" : ""}" data-live-id="${v.id}">
+      <img src="${livescanTitelbild(v).url}" alt="">
+      <span class="wer"><b>${esc(it.name)}</b>
+        <small>${esc(it.item_id)} · ${esc(tr("{n} % sicher", { n: it.score }))}${v.ansichten.length > 1
+          ? " · " + esc(tr("{n} Ansichten", { n: v.ansichten.length })) : ""}</small></span>
+      <small>${v.automatisch ? "⏱ " : ""}${uhr(v.zeit)}</small>
+    </button>`;
+  }).join("");
+  $("live-verlauf-liste").querySelectorAll("[data-live-id]").forEach((b) => {
+    b.addEventListener("click", async () => {
+      const v = livescanVerlauf.find((x) => String(x.id) === b.dataset.liveId);
+      if (!v) return;
+      livescanAktiv = v.id;
+      await handlePhoto(new File([livescanTitelbild(v).blob], "live-scanner.png", { type: "image/png" }),
+        { items: v.items });
+      livescanKatalogZeigen(v.items[0]);
+      livescanVerlaufZeigen();
+      livescanAnsichtenZeigen();
+    });
+  });
+}
+
+/* Die Ansichten der gerade gezeigten Figur, zum Anhaken (Mac-App:
+   `AnsichtenWahl`). Was angehakt ist, kommt beim Übernehmen als eigenes
+   Foto an den Artikel – mehrere Seiten derselben Figur aus dem Stream. */
+function livescanAnsichtenZeigen() {
+  const v = livescanEintrag();
+  const box = $("live-ansichten");
+  box.hidden = !v;
+  if (!v) return;
+  $("live-ansichten-liste").innerHTML = v.ansichten.map((a, i) => `
+    <div class="live-ansicht${v.an.has(i) ? " an" : ""}">
+      <button type="button" data-ansicht-zeigen="${i}" title="${esc(tr("Groß zeigen"))}"><img src="${a.url}" alt=""></button>
+      <label><input type="checkbox" data-ansicht-an="${i}"${v.an.has(i) ? " checked" : ""}> ${esc(tr("Foto dazu"))}</label>
+    </div>`).join("");
+  $("live-ansichten-liste").querySelectorAll("[data-ansicht-zeigen]").forEach((b) => {
+    b.addEventListener("click", () => {
+      const a = v.ansichten[Number(b.dataset.ansichtZeigen)];
+      if (a) $("preview-img").src = a.url;
+    });
+  });
+  $("live-ansichten-liste").querySelectorAll("[data-ansicht-an]").forEach((c) => {
+    c.addEventListener("change", () => {
+      const i = Number(c.dataset.ansichtAn);
+      if (c.checked) v.an.add(i); else v.an.delete(i);
+      c.closest(".live-ansicht").classList.toggle("an", c.checked);
+      livescanVerlaufZeigen();
+    });
+  });
+}
+
+/* Beim Übernehmen im Live-Scanner: die angehakten Ansichten statt des
+   einen Fotos – wie `gewaehlteAnsichten` in der Mac-App. Nichts angehakt
+   heißt: kein Foto. */
+async function livescanAnsichtenAnhaengen(it) {
+  const v = livescanEintrag();
+  if (!v || it._eigenbild) return;
+  for (const i of [...v.an].sort((a, b) => a - b)) {
+    const a = v.ansichten[i];
+    if (!a) continue;
+    const form = new FormData();
+    form.append("file", await verkleinern(new File([a.blob], "ansicht.png", { type: "image/png" })));
+    try {
+      const res = await api("/upload_image", { method: "POST", body: form });
+      await api("/item_photos", { method: "POST", body: {
+        item_type: it.item_type || "minifig", item_id: it.item_id, url: res.url } });
+      it._eigenbild = true;
+    } catch (e) {
+      toast(e.message);
+      return;
+    }
+  }
+}
+
+/* Zwei kurze Töne, wenn ein Treffer auf der Wunschliste steht – wie
+   `WunschTon` in der Mac-App. Ohne Audiodatei, damit nichts nachzuladen
+   ist. */
+function livescanTon() {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    [880, 1320].forEach((hz, i) => {
+      const o = ctx.createOscillator(), g = ctx.createGain();
+      o.frequency.value = hz;
+      g.gain.setValueAtTime(0.18, ctx.currentTime + i * 0.16);
+      g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + i * 0.16 + 0.15);
+      o.connect(g).connect(ctx.destination);
+      o.start(ctx.currentTime + i * 0.16);
+      o.stop(ctx.currentTime + i * 0.16 + 0.16);
+    });
+    setTimeout(() => ctx.close(), 600);
+  } catch (_) { /* ohne Ton */ }
+}
+
+function livescanVerdrahten() {
+  livescanWired = true;
+  $("btn-livescan-bereich").addEventListener("click", livescanWahlOeffnen);
+  $("btn-livescan-an").addEventListener("click", async () => {
+    const an = $("btn-livescan-an").textContent === tr("▶ Automatik an");
+    try {
+      const s = await api("/bildschirm/wachen", { method: "POST",
+        body: { an, stufe: $("livescan-stufe").value } });
+      livescanZeigen(s);
+      if (an && !livescanUhr) livescanUhr = setInterval(livescanAbfragen, 700);
+      if (an) toast(tr("Automatik an – erkannt wird, sobald dort etwas still steht"));
+    } catch (e) { toast(e.message); }
+  });
+  $("livescan-stufe").addEventListener("change", async () => {
+    const an = $("btn-livescan-an").textContent !== tr("▶ Automatik an");
+    try {
+      livescanZeigen(await api("/bildschirm/wachen", { method: "POST",
+        body: { an, stufe: $("livescan-stufe").value } }));
+    } catch (e) { toast(e.message); }
+  });
+  for (const [id, key, vorgabe] of [["livescan-nurfiguren", LIVESCAN_NURFIGUREN_KEY, false],
+    ["livescan-ton", LIVESCAN_TON_KEY, true]]) {
+    $(id).checked = livescanSchalter(key, vorgabe);
+    $(id).addEventListener("change", () => {
+      try { localStorage.setItem(key, $(id).checked ? "1" : "0"); } catch (_) { /* egal */ }
+    });
+  }
+  const jetzt = async () => {
+    try {
+      const r = await api("/bildschirm/jetzt", { method: "POST" });
+      livescanGesehen = r.nummer;
+      await livescanBildHolen(false);
+    } catch (e) { toast(e.message); }
+  };
+  $("btn-livescan-jetzt").addEventListener("click", jetzt);
+  // Strg+L wie ⌘L in der Mac-App.
+  document.addEventListener("keydown", (ev) => {
+    if ((ev.ctrlKey || ev.metaKey) && !ev.altKey && ev.key.toLowerCase() === "l"
+        && livescanModus() && !$("btn-livescan-jetzt").disabled) {
+      ev.preventDefault();
+      jetzt();
+    }
+  });
+  $("livescan-wahl-zu").addEventListener("click", () => { $("livescan-wahl").hidden = true; });
+}
+
+/* Bereich aufziehen. Das Foto ist verkleinert; zurückgerechnet wird mit
+   dem Maßstab und der linken oberen Ecke des Desktops aus dem Kopf der
+   Antwort (ein zweiter Bildschirm links hat negative Koordinaten). */
+let livescanWahl = null;
+
+async function livescanWahlOeffnen() {
+  const r = await fetch("/api/bildschirm/foto", {
+    headers: { Authorization: "Bearer " + state.token }, cache: "no-store" });
+  if (!r.ok) { toast(tr("Der Bildschirm lässt sich nicht aufnehmen.")); return; }
+  const [ux, uy] = (r.headers.get("X-Ursprung") || "0,0").split(",").map(Number);
+  const massstab = Number(r.headers.get("X-Massstab") || 1);
+  const foto = $("livescan-foto");
+  if (foto.src) URL.revokeObjectURL(foto.src);
+  foto.src = URL.createObjectURL(await r.blob());
+  livescanWahl = { ux, uy, massstab, rect: null };
+  $("livescan-rahmen").hidden = true;
+  $("livescan-wahl-ok").disabled = true;
+  $("livescan-wahl").hidden = false;
+  if (!foto.dataset.wired) livescanZiehenVerdrahten(foto);
+}
+
+function livescanZiehenVerdrahten(foto) {
+  foto.dataset.wired = "1";
+  const flaeche = $("livescan-flaeche");
+  const rahmen = $("livescan-rahmen");
+  let start = null;
+  const punkt = (ev) => {
+    const b = foto.getBoundingClientRect();
+    return { x: Math.min(Math.max(ev.clientX - b.left, 0), b.width),
+             y: Math.min(Math.max(ev.clientY - b.top, 0), b.height) };
+  };
+  const zeichnen = (a, z) => {
+    const x = Math.min(a.x, z.x), y = Math.min(a.y, z.y);
+    const w = Math.abs(z.x - a.x), h = Math.abs(z.y - a.y);
+    Object.assign(rahmen.style, { left: x + "px", top: y + "px", width: w + "px", height: h + "px" });
+    rahmen.hidden = false;
+    return { x, y, w, h };
+  };
+  flaeche.addEventListener("pointerdown", (ev) => {
+    start = punkt(ev);
+    flaeche.setPointerCapture(ev.pointerId);
+  });
+  flaeche.addEventListener("pointermove", (ev) => { if (start) zeichnen(start, punkt(ev)); });
+  flaeche.addEventListener("pointerup", (ev) => {
+    if (!start) return;
+    const r = zeichnen(start, punkt(ev));
+    start = null;
+    livescanWahl.rect = r;
+    $("livescan-wahl-ok").disabled = r.w < 8 || r.h < 8;
+  });
+  $("livescan-wahl-ok").addEventListener("click", async () => {
+    const w = livescanWahl, r = w.rect;
+    // Angezeigte Größe → Fotogröße → Bildschirmpunkte.
+    const f = foto.naturalWidth / foto.getBoundingClientRect().width / w.massstab;
+    try {
+      await api("/bildschirm/bereich", { method: "POST", body: {
+        x: Math.round(w.ux + r.x * f), y: Math.round(w.uy + r.y * f),
+        b: Math.round(r.w * f), h: Math.round(r.h * f) } });
+      $("livescan-wahl").hidden = true;
+      toast(tr("Bereich gemerkt ✔"));
+      livescanLaden();
+    } catch (e) { toast(e.message); }
+  });
+}
+
+function ordnerSchritt(was) {
+  $("ordner-anlegen").hidden = was !== "anlegen";
+  $("ordner-beitreten").hidden = was !== "beitreten";
+}
+
+async function ladeAbgleich() {
+  if (!state.desktop) return;
+  wireAbgleichOnce();
+  let s, o;
+  try {
+    [s, o] = await Promise.all([api("/abgleich"), api("/ordner")]);
+  } catch (e) { abgleichFehler(e.message); return; }
+  const an = !!s.an;
+  // Wer beim ersten Start einen Abgleich gewählt hat, soll hier gleich die
+  // Einrichtung sehen, nicht „Nur auf diesem Rechner“.
+  const weg = an ? "se" : o.an ? "wolke"
+    : ["se", "wolke"].includes(state.abgleichWunsch) ? state.abgleichWunsch : "aus";
+  document.querySelector(`input[name="abgleich-weg"][value="${weg}"]`).checked = true;
+  $("abgleich-verbunden").hidden = !an;
+  $("ordner-verbunden").hidden = !o.an;
+  ordnerWahlZeigen();
+  if (o.pfad && !o.google && !$("ordner-pfad").value) $("ordner-pfad").value = o.pfad;
+  // Vorhandene Cloud-Ordner zum Antippen – iCloud Drive zuerst, darüber
+  // gleicht Windows mit iPhone und Mac ab.
+  if (!o.an) api("/ordner/vorschlaege").then((v) => {
+    const box = $("ordner-vorschlaege");
+    box.replaceChildren(...v.ordner.map((x) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "btn btn-outline";
+      b.textContent = x.name;
+      b.title = x.pfad;
+      b.addEventListener("click", () => {
+        $("ordner-pfad").value = x.pfad;
+        $("ordner-pfad").dispatchEvent(new Event("input"));
+      });
+      return b;
+    }));
+    box.hidden = !v.ordner.length;
+  }).catch(() => {});
+  // Google Drive nur anbieten, wenn diese Fassung eine Kennung bei Google hat.
+  // Mit Google-Block erklärt der schon alles; der alte Satz stünde doppelt da.
+  api("/ordner/google").then((g) => {
+    $("ordner-google").hidden = !g.eingerichtet;
+    $("ordner-erklaerung").hidden = g.eingerichtet;
+  }).catch(() => {});
+  if (o.an) {
+    const wann = o.zuletzt ? new Date(o.zuletzt * 1000).toLocaleString() : tr("noch nie");
+    $("ordner-wo").textContent = o.google ? tr("Abgleich über Google Drive.")
+      : tr("Abgleich über den Ordner {pfad}.", { pfad: o.pfad });
+    $("ordner-stand").textContent = tr("Geräte im Ordner: {n}. Zuletzt abgeglichen: {wann}.",
+      { n: o.geraete, wann });
+  } else {
+    $("ordner-code-kasten").hidden = true;
+  }
+  if (s.adresse) $("abgleich-adresse").value = s.adresse;
+  if (s.benutzer) $("abgleich-benutzer").value = s.benutzer;
+  if (an) {
+    const wann = s.zuletzt ? new Date(s.zuletzt * 1000).toLocaleString() : tr("noch nie");
+    // Welche SE und auf welchem Weg – wer zwei hat oder unterwegs ist,
+    // soll es auf einen Blick sehen (18.10.2026). Den Namen liefert
+    // die SE selbst; ohne Namen bleibt die Adresse.
+    const instanz = s.name ? `${s.name} (${s.adresse})` : s.adresse;
+    const ueber = !s.zuletzt ? "" : s.weg === "connect" ? tr("über Nupplo Connect") : tr("zu Hause direkt");
+    $("abgleich-instanz").querySelector("strong").textContent = ueber
+      ? tr("Verbunden mit {instanz}, {weg}.", { instanz, weg: ueber })
+      : tr("Verbunden mit {instanz}.", { instanz });
+    $("abgleich-stand").textContent = tr("Angemeldet als {benutzer}. Zuletzt abgeglichen: {wann}.",
+      { benutzer: s.benutzer, wann });
+    // Unterwegs geht es nur, wenn beim Verbinden auch für Connect gekoppelt
+    // wurde – sonst soll man es vor der Reise wissen, nicht erst danach.
+    $("abgleich-unterwegs").textContent = s.unterwegs
+      ? tr("Unterwegs geht es über Nupplo Connect.")
+      : tr("Unterwegs geht es nicht: {grund}", { grund: tr(s.unterwegs_grund || "nicht gekoppelt") });
+  }
+  abgleichFehler(an ? s.fehler : o.an ? o.fehler : "");
+  abgleichWegZeigen();
+}
+
+function wireAbgleichOnce() {
+  if (abgleichWired) return;
+  abgleichWired = true;
+  document.querySelectorAll('input[name="abgleich-weg"]').forEach((r) => {
+    r.addEventListener("change", async () => {
+      if (r.value === "aus" && r.checked
+          && (!$("abgleich-verbunden").hidden || !$("ordner-verbunden").hidden)) {
+        await api("/abgleich/trennen", { method: "POST" }).catch(() => {});
+        await api("/ordner/trennen", { method: "POST" }).catch(() => {});
+        await ladeAbgleich();
+        return;
+      }
+      abgleichWegZeigen();
+    });
+  });
+  $("btn-abgleich-verbinden").addEventListener("click", async () => {
+    const btn = $("btn-abgleich-verbinden");
+    abgleichFehler("");
+    btn.disabled = true;
+    btn.textContent = tr("Verbinde …");
+    try {
+      const r = await api("/abgleich/verbinden", { method: "POST", body: {
+        adresse: $("abgleich-adresse").value.trim(),
+        benutzer: $("abgleich-benutzer").value.trim(),
+        passwort: $("abgleich-passwort").value,
+        code: $("abgleich-code").value.trim(),
+        challenge: abgleichChallenge } });
+      if (r.totp_required) {
+        abgleichChallenge = r.challenge;
+        $("abgleich-code-zeile").hidden = false;
+        $("abgleich-code").focus();
+        return;
+      }
+      abgleichChallenge = "";
+      $("abgleich-passwort").value = "";
+      $("abgleich-code").value = "";
+      $("abgleich-code-zeile").hidden = true;
+      toast(tr("Abgeglichen ✔"));
+      await ladeAbgleich();
+      assistentWeiter();
+    } catch (e) {
+      abgleichFehler(e.message);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = tr("Verbinden");
+    }
+  });
+  $("btn-abgleich-jetzt").addEventListener("click", async () => {
+    abgleichFehler("");
+    try {
+      await api("/abgleich/jetzt", { method: "POST" });
+      toast(tr("Abgeglichen ✔"));
+    } catch (e) { abgleichFehler(e.message); }
+    await ladeAbgleich();
+  });
+  $("btn-abgleich-trennen").addEventListener("click", async () => {
+    await api("/abgleich/trennen", { method: "POST" }).catch(() => {});
+    await ladeAbgleich();
+  });
+
+  // --- Cloud-Ordner (`backend/ordner.py`)
+  // Wohin eingerichtet wird: der Ordner aus dem Feld oder „google:“.
+  let ordnerOrt = () => $("ordner-pfad").value.trim();
+  $("ordner-pfad").addEventListener("input", () => {
+    ordnerOrt = () => $("ordner-pfad").value.trim();
+    ordnerSchritt("");
+  });
+  $("btn-ordner-waehlen").addEventListener("click", async () => {
+    const pfad = await window.pywebview.api.ordner_waehlen();
+    if (pfad) { $("ordner-pfad").value = pfad; ordnerSchritt(""); }
+  });
+  const ordnerPruefen = async (pfad) => {
+    abgleichFehler("");
+    if (!pfad) { abgleichFehler(tr("Bitte einen Ordner wählen.")); return; }
+    try {
+      const r = await api("/ordner/pruefen?pfad=" + encodeURIComponent(pfad));
+      if (!r.vorhanden) { ordnerSchritt("anlegen"); return; }
+      $("ordner-gefunden").textContent = tr("Hier gibt es schon einen Abgleich. Geräte darin: {n}.",
+        { n: r.geraete });
+      // Nur fragen, wenn hier schon etwas liegt – sonst gibt es nichts zu entscheiden.
+      $("ordner-ersetzen-wahl").hidden = r.hier_leer;
+      ordnerSchritt("beitreten");
+      $("ordner-code").focus();
+    } catch (e) { abgleichFehler(e.message); }
+  };
+  $("btn-ordner-pruefen").addEventListener("click", () => {
+    ordnerOrt = () => $("ordner-pfad").value.trim();
+    ordnerPruefen(ordnerOrt());
+  });
+  // Google Drive: Anmeldung im Browser des PCs (Google lässt sie im
+  // Fenster der App nicht zu), dann nachfragen, bis der Zugang da ist.
+  $("btn-google-verbinden").addEventListener("click", async () => {
+    abgleichFehler("");
+    const btn = $("btn-google-verbinden");
+    btn.disabled = true;
+    try {
+      const g = await api("/ordner/google");
+      if (!g.verbunden) {
+        const r = await api("/ordner/google/anmelden", { method: "POST" });
+        $("google-link").href = r.adresse;
+        $("google-warten").hidden = false;
+        const bis = Date.now() + 10 * 60 * 1000;
+        while (Date.now() < bis) {
+          await new Promise((fertig) => setTimeout(fertig, 2000));
+          if ((await api("/ordner/google")).verbunden) break;
+        }
+        $("google-warten").hidden = true;
+        if (!(await api("/ordner/google")).verbunden) {
+          abgleichFehler(tr("Keine Anmeldung bei Google angekommen. Bitte noch einmal."));
+          return;
+        }
+      }
+      ordnerOrt = () => "google:";
+      await ordnerPruefen("google:");
+    } catch (e) { abgleichFehler(e.message); }
+    finally { btn.disabled = false; }
+  });
+  const einrichten = async (btn, body) => {
+    abgleichFehler("");
+    btn.disabled = true;
+    try {
+      await api("/ordner/einrichten", { method: "POST", body });
+      toast(tr("Abgeglichen ✔"));
+      $("ordner-code").value = "";
+      ordnerSchritt("");
+      await ladeAbgleich();
+      return true;
+    } catch (e) { abgleichFehler(e.message); return false; }
+    finally { btn.disabled = false; }
+  };
+  $("btn-ordner-anlegen").addEventListener("click", async () => {
+    // Nach dem Anlegen gleich den Code zeigen: Ohne ihn kommt kein zweites
+    // Gerät hinein.
+    if (await einrichten($("btn-ordner-anlegen"), { pfad: ordnerOrt() })) {
+      await ordnerCodeZeigen();
+    }
+  });
+  $("btn-ordner-beitreten").addEventListener("click", () => {
+    const ersetzen = !$("ordner-ersetzen-wahl").hidden
+      && (document.querySelector('input[name="ordner-ersetzen"]:checked') || {}).value === "1";
+    if (ersetzen && !confirm(tr("Die Sammlung auf diesem Rechner wird durch die im Ordner ersetzt. Fortfahren?"))) return;
+    einrichten($("btn-ordner-beitreten"), {
+      pfad: ordnerOrt(), code: $("ordner-code").value.trim(), ersetzen })
+      .then((ok) => { if (ok) assistentWeiter(); });
+  });
+  $("btn-ordner-code").addEventListener("click", () => {
+    if ($("ordner-code-kasten").hidden) ordnerCodeZeigen();
+    else $("ordner-code-kasten").hidden = true;
+  });
+  $("btn-ordner-code-kopieren").addEventListener("click", async () => {
+    await kopieren($("ordner-code-text").textContent, "Code kopiert ✔");
+  });
+  $("btn-ordner-jetzt").addEventListener("click", async () => {
+    abgleichFehler("");
+    try {
+      await api("/ordner/jetzt", { method: "POST" });
+      toast(tr("Abgeglichen ✔"));
+    } catch (e) { abgleichFehler(e.message); }
+    await ladeAbgleich();
+  });
+  $("btn-ordner-trennen").addEventListener("click", async () => {
+    await api("/ordner/trennen", { method: "POST" }).catch(() => {});
+    await ladeAbgleich();
+  });
+}
+
+/* Verbindung verloren: ein Hinweis unten im Fenster, ohne erst in die
+   Einstellungen zu müssen (wie in Nupplo für Mac, 23.11.2026, Sven: „wenn
+   er sie doch mal verliert, sollte ein Hinweis zu sehen sein“). Solange er
+   steht, alle 20 Sekunden nachsehen; „Jetzt versuchen“ gleicht sofort ab. */
+let verbindungTakt = null;
+async function verbindungPruefen() {
+  let s = {}, o = {};
+  try {
+    [s, o] = await Promise.all([api("/abgleich"), api("/ordner")]);
+  } catch (_) { return verbindungHinweis(""); }   // nicht angemeldet o. Ä.
+  const fehler = s.an ? s.fehler : o.an ? o.fehler : "";
+  verbindungHinweis(fehler || "", s.an ? "se" : "ordner");
+}
+function verbindungHinweis(fehler, weg) {
+  const el = $("verbindung-hinweis");
+  if (!el) return;
+  el.hidden = !fehler;
+  if (fehler) {
+    $("verbindung-titel").textContent = weg === "se"
+      ? tr("Keine Verbindung zu deiner Nupplo SE")
+      : tr("Der Cloud-Ordner ist gerade nicht erreichbar");
+    $("verbindung-text").textContent = tr("Änderungen bleiben hier und gleichen sich ab, sobald es wieder geht.");
+    el.dataset.weg = weg;
+  }
+  clearTimeout(verbindungTakt);
+  verbindungTakt = setTimeout(verbindungPruefen, fehler ? 20000 : 60000);
+}
+function verbindungWache() {
+  const knopf = $("btn-verbindung-jetzt");
+  if (!knopf || knopf.dataset.wired) return;
+  knopf.dataset.wired = "1";
+  knopf.addEventListener("click", async () => {
+    knopf.disabled = true;
+    knopf.textContent = tr("Versuche …");
+    try {
+      const weg = $("verbindung-hinweis").dataset.weg === "se" ? "/abgleich/jetzt" : "/ordner/jetzt";
+      await api(weg, { method: "POST" });
+      toast(tr("Wieder verbunden ✔"));
+    } catch (_) { /* der Hinweis bleibt stehen */ }
+    knopf.disabled = false;
+    knopf.textContent = tr("Jetzt versuchen");
+    verbindungPruefen();
+  });
+  verbindungPruefen();
+}
+
+/* Ist der Abgleich im Assistenten eingerichtet, geht es von selbst weiter
+   – wie nach „Zwei-Faktor ist aktiv“. Sonst blieb die Karte nach
+   „Beitreten“ stehen, und man suchte, wie es weitergeht (06.11.2026).
+   Nach „Hier anlegen“ nicht: Dann steht der Code da, und den braucht das
+   zweite Gerät. */
+function assistentWeiter() {
+  if (!$("view-wizard").hidden && wizStep === WIZ_TFA) $("wiz-next").click();
+}
+
+async function ordnerCodeZeigen() {
+  try {
+    const r = await api("/ordner/code");
+    $("ordner-code-text").textContent = r.code;
+    const svg = await fetch("/api/ordner/qr", {
+      headers: { Authorization: "Bearer " + state.token } });
+    $("ordner-qr").innerHTML = svg.ok ? await svg.text() : "";
+    $("ordner-code-kasten").hidden = false;
+  } catch (e) { abgleichFehler(e.message); }
 }
 
 /* Stern-Bubble: ⭐ am aktuellen Instanz-Standard, ☆ an den übrigen. */
@@ -11553,16 +13560,16 @@ function renderPriceRegion() {
   const status = $("price-region-status");
   const run = $("price-region-run");
   if (!s.can_fetch) {
-    status.textContent = tr("Für Preise wird ein BrickLink-Schlüssel "
-      + "benötigt (Mehr → API-Schlüssel).");
+    // Was fehlt, sagt schon die Zeile unter „Preise holen von“. Zweimal
+    // dasselbe auf einer Karte liest sich wie zwei Probleme.
+    status.textContent = "";
     run.hidden = true;
     return;
   }
   if (s.pending > 0) {
     status.innerHTML = "⚠️ <b>" + esc(tr("{n} Artikel", { n: s.pending }))
-      + "</b> " + esc(tr("haben noch Preise aus einem anderen Gebiet. Das "
-        + "Umrechnen holt je Artikel zwei Preise von BrickLink – bei vielen "
-        + "Artikeln also in mehreren Durchgängen."));
+      + "</b> " + esc(tr("haben noch Preise aus einem anderen Gebiet. "
+        + "Umrechnen holt sie neu, bei vielen Artikeln in mehreren Durchgängen."));
     run.hidden = false;
   } else {
     status.textContent = tr("✅ Alle Preise stammen aus dem eingestellten Gebiet.");
@@ -11576,9 +13583,8 @@ function renderPriceRegion() {
     mStatus.hidden = false;
     mStatus.innerHTML = "⚠️ <b>" + esc(s.missing === 1 ? tr("1 Artikel")
       : tr("{n} Artikel", { n: s.missing })) + "</b> "
-      + esc(tr("hat/haben noch keinen Preis – oft, weil im gewählten Gebiet "
-        + "nichts verkauft wurde. Ein erneuter Abruf weitet auf Europa und "
-        + "weltweit aus."));
+      + esc(tr("hat/haben noch keinen Preis, oft weil dort nichts verkauft "
+        + "wurde. Ein neuer Abruf versucht es noch einmal."));
     mRun.hidden = false;
   } else {
     mStatus.hidden = true;
@@ -11629,6 +13635,106 @@ async function savePriceRegion(region, waehrung) {
     loadPriceRegion();               // Auswahl zurück auf den echten Stand
   } finally {
     sel.disabled = wsel.disabled = false;
+  }
+}
+
+/* Preisquelle: eigener BrickLink-Schlüssel oder der Tagesabzug des Hubs.
+   Seit 3.9.17 entscheidet allein der Schlüssel (entweder – oder). Beim Hub
+   verlässt keine Nummer die Instanz – geholt wird der ganze Abzug des
+   Gebiets, nachgeschlagen wird hier. */
+function renderPreisquelle(s) {
+  state.preisquelle = s.quelle;
+  angeboteHinweis();
+  const mitSchluessel = s.quelle !== "hub";
+  $("preisabruf-wahl").hidden = !mitSchluessel;
+  $("geraet-limit-wahl").hidden = $("preisabruf-status").hidden = !(mitSchluessel && state.desktop);
+  if (mitSchluessel && state.desktop) preisabrufStatus();
+  $("preisabruf-stunden").value = s.abruf_stunden || 24;
+  // Ohne Schlüssel sagen, wozu er gut wäre und wie man ihn bekommt.
+  $("bl-zugang-hub").hidden = mitSchluessel;
+  const hilfe = $("preisquelle-hilfe");
+  const st = $("preisquelle-status");
+  if (mitSchluessel) {
+    hilfe.textContent = tr("Nupplo holt alle Preise mit deinem eigenen "
+      + "Schlüssel bei BrickLink. Wie oft, legst du hier fest.");
+    st.textContent = "";
+    return;
+  }
+  hilfe.textContent = tr("Ohne eigenen Schlüssel kommen die Preise vom "
+    + "Nupplo-Preisdienst, nur für Star Wars und Herr der Ringe. Bei allem "
+    + "anderen steht ein Link zu BrickLink.");
+  const g = Object.values(s.gebiete || {})[0];
+  st.textContent = s.saetze > 0
+    ? tr("{n} Preise vom Preisdienst, Stand {datum}.", { n: s.saetze,
+      datum: g && g.geholt_am
+        ? new Date(g.geholt_am * 1000).toLocaleDateString() : "–" })
+    : tr("Noch keine Preise vom Preisdienst geladen.");
+}
+
+async function loadPreisquelle() {
+  try { renderPreisquelle(await api("/settings/preisquelle")); }
+  catch (_) { /* Karte bleibt ohne Status */ }
+}
+
+/* Statuszeile in Nupplo für Windows: „412 von 430 Preisen aktuell · heute
+   860 Abrufe · zuletzt …“, dazu das Tageslimit des Geräts. */
+function preisabrufStatusZeigen(s) {
+  $("geraet-limit").value = s.limit;
+  const teile = [tr("{a} von {g} Preisen aktuell", { a: s.aktuell, g: s.gesamt }),
+    tr("heute {n} von {limit} Abrufen", { n: s.heute, limit: s.limit })];
+  // Geteilt über die SE (25.11.2026): was die anderen Geräte mit demselben
+  // Schlüssel heute abgerufen haben.
+  if (s.geteilt && s.geteilt.geraete) {
+    teile.push(tr("andere Geräte heute {n}", { n: s.geteilt.andere }));
+  }
+  if (s.zuletzt) teile.push(tr("zuletzt {wann}", { wann: new Date(s.zuletzt * 1000).toLocaleString() }));
+  let text = teile.join(" · ");
+  if (s.bricklink_limit) text += " · " + tr("BrickLink meldet das Tageslimit, morgen geht es weiter.");
+  else if (!s.frei && s.geteilt && s.heute < s.limit) text += " · " + tr("Deine Geräte haben heute zusammen genug abgerufen, morgen geht es weiter.");
+  else if (!s.frei) text += " · " + tr("Tageslimit erreicht, morgen geht es weiter.");
+  $("preisabruf-status").textContent = text;
+}
+
+async function preisabrufStatus() {
+  try { preisabrufStatusZeigen(await api("/preisabruf")); }
+  catch (_) { $("preisabruf-status").hidden = true; }
+}
+
+async function saveGeraetLimit() {
+  const n = parseInt($("geraet-limit").value, 10);
+  if (!(n >= 100 && n <= 5000)) {
+    toast(tr("Bitte 100 bis 5000 Abrufe."));
+    return;
+  }
+  const btn = $("btn-geraet-limit");
+  btn.disabled = true;
+  try {
+    preisabrufStatusZeigen(await api("/preisabruf/limit", { method: "POST", body: { n } }));
+    toast(tr("Gespeichert ✔"));
+  } catch (e) {
+    toast(e.message);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function savePreisabruf() {
+  const sel = $("btn-preisabruf");
+  const stunden = parseInt($("preisabruf-stunden").value, 10);
+  if (!(stunden >= 1 && stunden <= 720)) {
+    toast(tr("Bitte 1 bis 720 Stunden."));
+    return;
+  }
+  sel.disabled = true;
+  try {
+    renderPreisquelle(await api("/settings/preisabruf", { method: "POST",
+      body: { stunden } }));
+    toast(tr("Gespeichert ✔"));
+  } catch (e) {
+    toast(e.message);
+    loadPreisquelle();
+  } finally {
+    sel.disabled = false;
   }
 }
 
@@ -11808,16 +13914,12 @@ async function loadPriceLog(limit) {
     const res = await api(`/price_log?limit=${limit}`);
     const staleEl = $("pricelog-stale");
     if (staleEl) {
-      const days = res.stale_days || 7;
       const n = res.stale_count || 0;
       staleEl.textContent = n > 0
         ? (n === 1
-          ? tr("🕒 Bei einem Artikel ist der Preisabruf älter als {d} Tage – "
-            + "der Hintergrundjob frischt ihn auf.", { d: days })
-          : tr("🕒 Bei {n} Artikeln ist der Preisabruf älter als {d} Tage – "
-            + "der Hintergrundjob frischt sie nach und nach auf.",
-            { n, d: days }))
-        : tr("✔ Alle Sammlungs-Preise sind jünger als {d} Tage.", { d: days });
+          ? tr("🕒 Ein Artikel hat gerade keinen aktuellen Preis.")
+          : tr("🕒 {n} Artikel haben gerade keinen aktuellen Preis.", { n }))
+        : tr("✔ Alle Sammlungs-Preise sind aktuell.");
       staleEl.hidden = false;
     }
     if (!res.entries.length) {
@@ -12102,7 +14204,8 @@ async function loadSettings() {
     if (dealerUi) $("offer-percent").value = state.offerPercent || 60;
   }
   if ($("pricelog-card")) {
-    $("pricelog-card").hidden = !dealerUi;
+    // Ohne Preisquelle kommt nichts ins Protokoll.
+    $("pricelog-card").hidden = !dealerUi || !state.bricklinkPrices;
     if (dealerUi) loadPriceLog(50);
   }
   $("settings-user").textContent = state.user ? state.user.username : "";
@@ -12151,7 +14254,7 @@ async function loadSettings() {
   $("errors-card").hidden = !isAdmin;
   if (isAdmin) loadErrors();
   $("price-region-card").hidden = !isAdmin;
-  if (isAdmin) loadPriceRegion();
+  if (isAdmin) { loadPriceRegion(); loadPreisquelle(); }
   $("images-card").hidden = !isAdmin;
   if (isAdmin) loadImagesStatus();
   $("external-access-card").hidden = !isAdmin;
@@ -12304,6 +14407,15 @@ function startbildschirmSchliessen() {
 }
 
 document.addEventListener("DOMContentLoaded", async () => {
+  // Läuft die SE im Programm (Nupplo für Windows)? Dann blendet das CSS
+  // aus, was nur auf einem Server Sinn hat. Nebenher, nicht abwarten.
+  const desktopAbfrage = fetch("/api/desktop").then((r) => r.json())
+    .then((d) => {
+      state.desktop = !!d.desktop;
+      document.body.classList.toggle("desktop", state.desktop);
+      livescanLaden();
+      if (state.desktop) verbindungWache();
+    }).catch(() => { /* eine NAS-SE ohne die Abfrage: wie bisher */ });
   // Sprache zuerst: Danach steht das Dokument fertig übersetzt da, ohne dass
   // deutscher Text kurz aufblitzt. Bei Deutsch kostet das nichts.
   await loadLang();
@@ -12408,11 +14520,41 @@ document.addEventListener("DOMContentLoaded", async () => {
     const [typ, id] = (ziel.dataset.info || "").split("|");
     if (!id) return;
     ev.stopPropagation();
+    // Die Nachbarn in derselben Liste – zum Durchblättern.
+    const reihe = [...(ziel.parentElement ? ziel.parentElement.children : [])]
+      .filter((e) => e.matches("[data-info]"));
+    const liste = reihe.map((e) => {
+      const [t, i] = (e.dataset.info || "").split("|");
+      return { typ: t, id: i, name: e.dataset.infoName || "", img: e.dataset.infoImg || "" };
+    }).filter((e) => e.id);
+    const index = reihe.indexOf(ziel);
     steckbriefOeffnen(id, typ, {
       name: ziel.dataset.infoName || "",
       img_url: ziel.dataset.infoImg || "",
-    });
+    }, liste.length > 1 && index >= 0 ? { liste, index } : null);
   });
+  $("btn-figinfo-zurueck").addEventListener("click", () => steckbriefBlaettern(-1));
+  $("btn-figinfo-vor").addEventListener("click", () => steckbriefBlaettern(1));
+  document.addEventListener("keydown", (ev) => {
+    if (ev.target.closest && ev.target.closest("input, textarea, select")) return;
+    if (!$("lightbox").hidden) return;
+    if (ev.key === "ArrowLeft" && steckbriefBlaettern(-1)) ev.preventDefault();
+    if (ev.key === "ArrowRight" && steckbriefBlaettern(1)) ev.preventDefault();
+  });
+  // Wischen auf Touch-Bildschirmen: waagerecht, deutlich und nicht zu schräg.
+  let wischStart = null;
+  const fiBody = $("figinfo-body");
+  fiBody.addEventListener("touchstart", (ev) => {
+    const t = ev.touches[0];
+    wischStart = ev.touches.length === 1 ? { x: t.clientX, y: t.clientY } : null;
+  }, { passive: true });
+  fiBody.addEventListener("touchend", (ev) => {
+    if (!wischStart) return;
+    const t = ev.changedTouches[0];
+    const dx = t.clientX - wischStart.x, dy = t.clientY - wischStart.y;
+    wischStart = null;
+    if (Math.abs(dx) > 60 && Math.abs(dx) > 2 * Math.abs(dy)) steckbriefBlaettern(dx < 0 ? 1 : -1);
+  }, { passive: true });
   $("btn-setup").addEventListener("click", doSetup);
   $("setup-pass2").addEventListener("keydown", (ev) => {
     if (ev.key === "Enter") doSetup();
@@ -12449,6 +14591,8 @@ document.addEventListener("DOMContentLoaded", async () => {
   $("price-currency").addEventListener("change", (ev) =>
     savePriceRegion($("price-region").value, ev.currentTarget.value));
   $("btn-price-recalc").addEventListener("click", recalcPrices);
+  $("btn-preisabruf").addEventListener("click", savePreisabruf);
+  $("btn-geraet-limit").addEventListener("click", saveGeraetLimit);
   $("btn-images-fetch").addEventListener("click", fetchImages);
   $("btn-price-fill").addEventListener("click", fillMissingPrices);
 
@@ -12681,7 +14825,9 @@ document.addEventListener("DOMContentLoaded", async () => {
   $("btn-print-col").addEventListener("click", () => printCollection().catch((e) => toast(e.message)));
   $("btn-print-want").addEventListener("click", () => printWanted().catch((e) => toast(e.message)));
   $("btn-save-keys").addEventListener("click", saveApiKeys);
-  $("btn-test-keys").addEventListener("click", testApiKeys);
+  $("btn-test-keys").addEventListener("click", () => testApiKeys("keys-status"));
+  $("btn-save-bl").addEventListener("click", saveApiKeys);
+  $("btn-test-bl").addEventListener("click", () => testApiKeys("bl-status"));
   $("btn-save-ollama").addEventListener("click", saveOllama);
   $("btn-test-ollama").addEventListener("click", testOllama);
   $("btn-reload-models").addEventListener("click", modelleLaden);
@@ -12703,6 +14849,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   // Nach dem Tippen einer neuen Adresse gleich nachsehen, was dort liegt –
   // sonst zeigt die Liste die Modelle des alten Servers.
   $("ollama-url").addEventListener("change", modelleLaden);
+  $("ollama-url").addEventListener("input", ollamaFelder);
   $("btn-camera").addEventListener("click", kameraOeffnen);
   $("kamera-ausloeser").addEventListener("click", kameraAusloesen);
   $("kamera-abbrechen").addEventListener("click", kameraSchliessen);
@@ -12840,17 +14987,43 @@ document.addEventListener("DOMContentLoaded", async () => {
       get() { return wert.get.call(this); },
       set(v) { wert.set.call(this, v); sync(); },
     });
-    btn.addEventListener("click", () => {
+    const leeren = () => {
       input.value = "";
       sync();
       input.focus();
       input.dispatchEvent(new Event("input", { bubbles: true }));
+    };
+    btn.addEventListener("click", leeren);
+    // Esc leert ebenso – aber nur, wenn etwas drinsteht; sonst gehört die
+    // Taste dem Fenster (Schließen).
+    input.addEventListener("keydown", (ev) => {
+      if (ev.key !== "Escape" || input.value === "") return;
+      ev.preventDefault();
+      ev.stopPropagation();
+      leeren();
     });
     sync();
   });
 
   if (state.token) { refreshMe(); showApp(); } else showLogin();
   startbildschirmSchliessen();
+  // Erstes Fenster von Nupplo für Windows: Den Assistenten zeigt auf dem
+  // NAS das Anlegen des Kontos – hier legt das Programm es selbst an, und
+  // `/desktop/start` schickt einmalig `?willkommen=1` mit.
+  // Mit `abgleich=se` oder `=wolke` (beim ersten Start gewählt)
+  // geht es gleich zum Schritt Abgleich – der Rest des Assistenten bleibt
+  // über „Zurück“ erreichbar.
+  const startFrage = new URLSearchParams(location.search);
+  if (state.token && (startFrage.has("willkommen")
+      || ["se", "wolke"].includes(startFrage.get("abgleich")))) {
+    history.replaceState(null, "", "/");
+    await desktopAbfrage;
+    if (state.desktop) {
+      state.abgleichWunsch = startFrage.get("abgleich") || "";
+      startWizard();
+      if (["se", "wolke"].includes(state.abgleichWunsch)) { wizStep = WIZ_TFA; showWizStep(); }
+    }
+  }
 
   // Galerie: Tipp auf ein Kartenbild öffnet alle Katalogbilder der Figur.
   //
@@ -12864,7 +15037,9 @@ document.addEventListener("DOMContentLoaded", async () => {
     if (!img || !img.src || img.src.startsWith("data:")) return;
     if (collAnsicht() === "kompakt"
         && img.closest("#collection-list")) return;
-    openGallery(imgGross(img.src), img.dataset.gid, img.dataset.gtype);
+    let dazu = [];
+    try { dazu = JSON.parse(img.dataset.bilder || "[]"); } catch (_) { /* egal */ }
+    openGallery(imgGross(img.src), img.dataset.gid, img.dataset.gtype, dazu);
   });
   $("lightbox").addEventListener("click", (ev) => {
     if (ev.target.closest(".lb-nav, .lb-del")) return;
@@ -13071,7 +15246,7 @@ function updateInstallCard() {
     text.innerHTML = tr("Dafür muss die App über <b>https</b> erreichbar "
       + "sein – über eine reine <b>http</b>-Adresse im Heimnetz erlauben die "
       + "Browser das Hinzufügen nicht. Einen verschlüsselten Zugang richtet "
-      + "der Assistent unter <b>Mehr → Externer Zugriff</b> ein.");
+      + "der Assistent unter <b>Mehr → Eigener Cloudflare-Tunnel</b> ein.");
     go.hidden = true;
     card.hidden = false;
   } else {
@@ -13317,7 +15492,9 @@ function katKategorienVerdrahten() {
     try {
       const d = await api("/katalog/kategorien", { method: "POST" });
       stand.textContent = tr("{n} Kategorien geholt.", { n: d.kategorien });
+      toast(stand.textContent);   // der Block verschwindet gleich, s. o.
       katThemenGeholt = false;
+      katalogStand();
     } catch (e) {
       stand.textContent = e.message;
     } finally {
@@ -13433,7 +15610,57 @@ function jedipediaLink(itemId, name) {
      aria-label="${esc(tr("In der Jedipedia nachschlagen"))}">ⓘ</a>`;
 }
 
+/* Was Angebotspreise kosten, hängt an der Quelle: Mit eigenem Schlüssel
+   sind es zusätzliche Abrufe, beim Preisdienst gibt es sie bisher nur für
+   die Nummern, nach denen im Tauschnetz gefragt wird. */
+function angeboteHinweis() {
+  const el = $("angebote-quelle-hint");
+  if (!el) return;
+  // Ohne Preisquelle gibt es auch keine Angebote. Der Schalter tat dann
+  // nichts und sah trotzdem aus, als ginge es.
+  // Angebote („ab“) gibt es seit 3.9.17 nur mit eigenem Schlüssel; der
+  // Preisdienst führt nur Verkäufe. Ohne Schlüssel kein Schalter, der
+  // nichts täte.
+  // Seit 25.11.2026 immer zu sehen, ohne Schlüssel ausgegraut – sonst
+  // suchte man den Schalter, statt zu lesen, warum er nicht geht.
+  const ohne = !state.bricklinkPrices || state.preisquelle === "hub";
+  $("angebote-wahl").hidden = false;
+  $("angebote-wahl").classList.toggle("ausgegraut", ohne);
+  $("opt-angebote").disabled = ohne;
+  if (ohne) {
+    el.textContent = tr("Nur mit eigenem BrickLink-Schlüssel (Mehr → Preise). "
+      + "Der Nupplo-Preisdienst kennt nur Verkäufe.");
+    return;
+  }
+  el.textContent = state.desktop
+    ? tr("Kostet zusätzliche BrickLink-Abrufe, deshalb nur im Steckbrief und "
+      + "nicht für ganze Listen. Angebote werden nicht gespeichert.")
+    : tr("Kostet zusätzliche BrickLink-Abrufe. Angebote werden "
+      + "nicht gespeichert.");
+}
+
 function angeboteVerdrahten() {
+  // Brickmerges Angebotspreis gleich daneben und genauso: aus, bis man ihn
+  // will („genauso wie die ab-Preise von Bricklink optional“, Sven). Die
+  // Setbilder ebenso („Aber auch abschaltbar bitte“, 10.10.2026).
+  for (const [id, feld, pfad] of [
+    ["opt-brickmerge-preise", "brickmergePreise", "brickmerge_preise"],
+    ["opt-brickmerge-bilder", "brickmergeBilder", "brickmerge_bilder"],
+  ]) {
+    const bm = $(id);
+    if (!bm) continue;
+    bm.addEventListener("change", async () => {
+      const an = bm.checked;
+      state[feld] = an;
+      try {
+        await api(`/settings/${pfad}`, { method: "POST", body: { an } });
+      } catch (e) {
+        bm.checked = !an;
+        state[feld] = !an;
+        toast(tr("Ging nicht."));
+      }
+    });
+  }
   const schalter = $("opt-angebote");
   if (!schalter) return;
   schalter.addEventListener("change", async () => {
@@ -13515,4 +15742,3 @@ function jedipediaVerdrahten() {
     }
   });
 }
-

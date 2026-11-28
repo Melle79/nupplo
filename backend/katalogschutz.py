@@ -1,4 +1,4 @@
-"""Den verschlüsselten Figurenkatalog lesen (seit 3.8.2).
+"""Den verschlüsselten Figurenkatalog lesen (seit 3.9.15).
 
 **Warum er verschlüsselt ist.** Bis dahin stand der Abzug als Klartext im
 öffentlichen Repo, und das Repo steht unter MIT – jeder durfte die

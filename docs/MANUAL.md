@@ -50,7 +50,13 @@ Several family members share one database, each with their own login.
 The app only reaches outside where it has to: for scanning (Brickognize), for
 search by name (Rebrickable) and for prices and set contents (BrickLink). The
 latter two need your own free access – see 2.4. Without them everything else
-keeps working.
+keeps working. Release, retirement and RRP come with the catalogue;
+the fact sheet asks nobody for them. Two switches under **More → Asking
+prices**, both off by default, change that: with **Show asking prices from
+Brickmerge** the server fetches a set's Brickmerge page for the price when
+you open its fact sheet (at most once a day per set); with **Show set
+pictures from Brickmerge** your browser loads the further set pictures
+directly from Brickmerge.
 
 **One point that is easily missed: the images.** The database holds only the
 *address* of each item's catalogue picture. It used to be fetched by **your
@@ -147,12 +153,17 @@ steps:
 1. **Display name** – the name in the logo, the window title, the **app icon**,
    the small icon in the browser tab and the name on the phone's home screen
    ("Anna's Nupplo")
-2. **Price region and currency** – which market the average prices come from
-   and in which currency; preselected is what matches your browser's language
-   settings (see chapter 13.1)
-3. **Rebrickable key** – for search by name, with a direct link
-4. **BrickLink access** – the four values for prices and set contents
-5. **Test the connection** – a real test call to both services, so a mixed-up
+2. **Prices** – without your own key or with one (then "Fetch prices every
+   … hours", 24 by default), plus region and currency. The step explains what works
+   without a key (Star Wars and The Lord of the Rings) and how to get one.
+   Region and currency are preselected to match your browser's language
+   settings (see chapters 2.4 and 13.1)
+3. **Rebrickable key** (optional) – for search for sets, parts and brand-new
+   figures, with a direct link
+4. **Own BrickLink access** (optional) – the four values; needed for prices
+   only if you chose it in step 2, and also for set contents and names when
+   adding items
+5. **Test the connection** – a real test with each service, so a mixed-up
    key shows up now and not at your first scan
 6. **Trading network** – if somebody invited you (see chapter 12)
 7. **Secure with two-factor** – recommended once the app is reachable from
@@ -161,9 +172,9 @@ steps:
 8. **Done**
 
 **Every step can be skipped**, and at the bottom there is "Finish the wizard
-and get started". Without keys everything works except prices, set contents
-and search by name – **scanning needs no key at all**. Anything can be added
-later under *More → API keys*.
+and get started". **Scanning needs no key at all**, and the price service
+gives you prices without one too. Anything can be added later under
+*More → Prices* and *More → Catalogue search*.
 
 The wizard runs exactly once, right after the admin account is created.
 
@@ -189,13 +200,39 @@ with your **existing credentials** – same name, same password as before.
 *For unattended setups:* if the environment variables
 `ADMIN_USER`/`ADMIN_PASSWORD` are set, Nupplo creates the admin on the
 very first start; the wizard is then skipped and the keys come either from
-environment variables or from *More → API keys*.
+environment variables or from *More → Prices* or *More → Catalogue search*.
+Without a BrickLink key, prices come from the price service (since 3.9.17
+there is no choice, and `PREISQUELLE` no longer counts).
 
-### 2.4 Setting up API keys (admin)
+### 2.4 Setting up prices and keys (admin)
 
-Under **More → API keys** (only visible to admins):
+There are **two ways** to get prices, **either – or** (since 3.9.17). Which
+one applies depends only on whether your own BrickLink key is entered. Under
+**More → 💶 Prices** (only visible to admins):
 
-**BrickLink** – provides average prices, release years and set contents:
+- **Without your own key: Nupplo price service.** Once a day Nupplo fetches
+  the whole price list for the chosen region, hourly in between only what is
+  new, and looks things up only on its side. The price service never learns which figures are in the collection.
+  It only covers **Star Wars and The Lord of the Rings**: all minifigures
+  daily, sets on request. When someone opens a set without a fresh price,
+  Nupplo asks the hub for that one number ("Price requested"). The hub does
+  not record who asked. Everything else shows **"See price on BrickLink"**.
+- **With your own key: BrickLink.** Nupplo fetches all prices itself and
+  never uses the price service. Nothing it fetches goes to the hub. Below,
+  you set **"Fetch prices every … hours"**, 24 by default, anything from 1
+  to 720. The fields sit on the same card under
+  **"🔑 Own BrickLink access"**, which opens up.
+
+**Price-service prices never older than 26 hours.** BrickLink's API terms do
+not allow showing old prices, so central prices have a fixed limit of 26
+hours. Anything older disappears from the collection, lists and value, and
+"See price on BrickLink" shows instead. The collection value counts only the
+prices there are and says how many have none. The price history only appears
+next to a current price. With your own key, your chosen interval applies.
+
+Region and currency follow below (chapter 13.1).
+
+**Own BrickLink access** – provides all average prices, release years, set contents and names when adding items:
 
 1. You need a BrickLink account **with an opened store** – the store API is
    only open to sellers. The store does not have to sell anything, it just
@@ -206,7 +243,8 @@ Under **More → API keys** (only visible to admins):
    address.
 3. Copy the four values – *Consumer Key*, *Consumer Secret*, *Token*,
    *Token Secret* – into the four fields in the app and save.
-4. Below that is **Operator's contact address**. BrickLink's terms of use
+4. Once access is entered, **Operator's contact address** appears below
+   (without your own access the field stays hidden). BrickLink's terms of use
    require a visible contact address in the application. **Not for
    BrickLink** – they know you from your registration – but so that
    **strangers using your instance** can reach you. The field is therefore
@@ -231,18 +269,31 @@ what it *costs* if you buy now.
 
 It appears in the detail view and as a small badge in wanted and shopping
 lists – there for the condition the item has on the list (“from … new” or
-“from … used”; on the wanted list, used). It is **off** by default: every lookup costs additional BrickLink
-requests, and the daily limit is 5,000. Asking prices are **not stored** –
+“from … used”; on the wanted list, used). It is **off** by default: with your
+own access every lookup costs additional BrickLink requests (daily limit
+5,000). Since 3.9.17 asking prices are **only available with your own key**; the price service carries sales only. Without a key, the switch and the "from" line are gone. Asking prices are **not stored** –
 the value of your collection keeps resting on actual sales.
 
-**Rebrickable** – provides search by name:
+Right below: **Show asking prices from Brickmerge**. Sets then also show
+"At Brickmerge: from … ↗" on the **Prices** tab – the cheapest offer there,
+excluding shipping. This too is **off** by default. Only for this does
+your server ask Brickmerge when you open a fact sheet; everything else about
+the set comes with the catalogue.
+
+Below it: **Show set pictures from Brickmerge**, also **off** by default.
+The set fact sheet then shows a row of further pictures that your browser
+loads directly from Brickmerge.
+
+**Rebrickable** (optional, **More → 🔎 Catalogue search**) – also finds sets,
+parts and brand-new figures; figures from the catalogue copy are found
+without it:
 
 1. Create a free account on rebrickable.com.
 2. Under [Account → API](https://rebrickable.com/api/) create a key and enter
-   it in the *Rebrickable Key* field.
+   it in the *Rebrickable key* field.
 
-Finally press **"Test connection"** – the app checks both and reports the
-result. The same instructions live inside the app too: ❓ button at the top
+Finally press **"Test connection"** – the app checks each service and reports
+the result; with the price service it also says whether prices are loaded. The same instructions live inside the app too: ❓ button at the top
 right → "Getting API keys". Stored keys are shown masked; leaving a field
 empty when saving keeps the existing value. Alternatively all keys can be set
 as environment variables (see README); the settings in the app take
@@ -259,8 +310,8 @@ the device:
 - **iPhone and iPad**: Safari has no button for this – the card explains the
   route via *Share → "Add to Home Screen"*.
 - **Over a plain `http` address on the home network** no browser allows
-  adding it. The card then says exactly that and points to *More → External
-  access* (2.7), which sets up an encrypted address.
+  adding it. The card then says exactly that and points to *More → Your own
+  Cloudflare tunnel* (2.7), which sets up an encrypted address.
 
 **Pull down to reload.** Started from the home screen there is no address
 bar and therefore no reload button; on iOS there is no gesture for it either.
@@ -323,17 +374,34 @@ regular user only sees the first group and the sources at the very bottom.
 | | 📤 Export & print | everyone |
 | | 💼 Collector-Pro (offer suggestion, CSV import) | Collector-Pro |
 | | 📈 Price log | Collector-Pro |
+| | 🏷 Asking prices | everyone |
+| | 🔗 Outside links (Jedipedia, building instructions) | everyone |
+| | 🐢 Gentle image mode | everyone |
 | 🏠 **This instance** | 🏷 Display name | Admin |
 | | 👥 Manage users | Admin |
-| | 🔑 API keys | Admin |
-| | 🌍 Price region & currency | Admin |
+| | 💶 Prices (source, region, currency, own BrickLink access) | Admin |
+| | 🔎 Catalogue search (Rebrickable) | Admin |
+| | 🤖 Local AI for search | Admin |
+| | 📚 Catalogue copy | Admin |
 | | 🖼 Images on your instance | Admin |
-| 🌐 **Outward** | 🌐 External access | Admin |
+| 🌐 **Outward** | 📡 Access without port forwarding | Admin |
+| | 🌐 Your own Cloudflare tunnel | Admin |
 | | 🤝 Trading network (connect/disconnect) | Admin |
 | 🛠 **Maintenance** | 💾 Backup | Admin |
 | | 🔄 Version & updates | Admin |
 | | 🐞 Error report | Admin |
 | *(no group)* | ℹ️ Sources & legal | everyone |
+
+**What does nothing in the current state isn't shown** (since 3.9.11):
+"Only with a second factor" appears once access without port forwarding is
+on; the AI's model and connection test once an address is entered; the
+Cloudflare block once address and token are filled in; the asking-price
+switch and the price log only with a price source. In the catalogue copy,
+"Read catalogue file" and "Fetch categories" only appear while they have
+something to fetch: the catalogue already brings every figure's parts and,
+for sets, name, theme, year, pieces, figures and German names. Only figure
+names are missing – BrickLink's terms forbid passing them on – and come
+from your own BrickLink access or BrickLink's catalogue file.
 
 **🌐 Language** switches between German and English. The choice is stored in
 your profile and therefore applies on every device; without one the app
@@ -600,6 +668,18 @@ you can also **drag and drop** an image onto the scan area or paste a
 probability, image, number and – depending on the data – year, average prices
 and ownership hints.
 
+**Check first** (from 3.9.0): if a match has a near-identical figure, the
+question that tells them apart appears below it – for example "With
+rangefinder? Then sw1423, otherwise sw1422." Tapping the
+question opens the other figure's profile. The same question appears under
+the results of **Add manually**.
+
+**Collectible minifigure boxes:** the scanner for the code on the box is
+only in the mobile apps (since 3.9.17 no longer in the browser interface).
+The instance provides them with the code list and what was learned. If you
+photograph a box with a known code here anyway, the figure appears as a
+match without the photo going to Brickognize.
+
 **Tips for good hit rates:** a plain background, the figure from the front, no
 reflective packaging. For sets the box image or the built model works.
 
@@ -836,6 +916,13 @@ work normally.
 While you type the name the app suggests catalogue matches in parallel; if one
 fits, a tap takes over its number and image.
 
+**Parts with colour:** with type **Part** the search finds minifigure parts
+in German and with colour too, e.g. "white stormtrooper helmet with yellow
+print". The parts come from the figures' parts lists; parts in the colour you
+named come first, and words like "print" or "printed" leave only printed
+parts. The colour is part of the match's name, e.g. "Minifig, Headgear Helmet
+Stormtrooper … (White)".
+
 *(Pro)* **"🛒 Onto a list"** puts the entry straight onto a shopping list –
 including custom builds that appear in no catalogue.
 
@@ -1059,6 +1146,45 @@ automatically):
 - In the figure details (search as well as collection), sets from **your
   collection** are marked as **yellow chips with ✔** and jump to the set card;
   sets you do not own appear as blue BrickLink links.
+- Below a set's name and number its **key facts** appear in small print:
+  parts and minifigs, when it was released and when it retired (**Retired**)
+  or will retire; "≈" means estimated. If the theme has a sub-theme, it is
+  shown below ("Star Wars · Ultimate Collector Series"). Parts and minifigs
+  come from Rebrickable via the catalogue – Rebrickable counts parts
+  slightly differently from the box (7190: 671 instead of 663). Release,
+  retirement and RRP are from **Brickmerge** and come with the catalogue;
+  the catalogue service asks Brickmerge, not your server when you open the
+  fact sheet. Young sets are refreshed weekly. No retirement date means
+  nobody knows; it does not mean the set is still on sale. Custom sets leave
+  the space empty.
+- The **Prices** tab of every set shows the **RRP**. If you have switched on
+  Brickmerge prices under **More → Asking prices**, it also shows **"At
+  Brickmerge: from … ↗"** – the cheapest offer, excluding shipping; a tap
+  opens the page with all shops. If Brickmerge cannot be reached or the set
+  has retired, only the link is shown.
+- A **set from the search** ("Add manually") shows the same key facts,
+  pictures and price lines before you add it.
+- With **More → Asking prices → Show set pictures from Brickmerge** (off
+  by default) a row of Brickmerge's **further set pictures** (box, views)
+  appears below the large picture. Tapping one – or the large picture –
+  opens the full view, where you swipe through all of them. The main
+  picture stays the catalogue one; only where a set has none does
+  Brickmerge's step in. Your browser loads these pictures directly from
+  Brickmerge; your server keeps no copy. Switched off, there is no row and
+  no request to Brickmerge.
+- Sets from this year and last are re-checked regularly: if BrickLink or the
+  catalogue now lists more figures than when you added the set, Nupplo asks
+  the next time you open it, just as when adding a set, which of them you
+  have, and adds only the ticked ones. Each set is asked about once.
+- Since 3.9.3 **"👥 Figures it contains"** also works without your own
+  BrickLink account: the figures come from the same set file. Figures with
+  no unambiguous BrickLink number are shown with Rebrickable's name and
+  picture. The **catalogue** now has sets even without an uploaded
+  Sets.xml.
+- Since 3.9.5 figures that, according to the catalogue, come only in this
+  set are marked **Exclusive**. A re-release of the same set does not count
+  as a second set. If the catalogue doesn't know a figure, there is no mark
+  – that does not mean it comes in other sets.
 
 ### 5.5 Purchase prices & profit *(Collector-Pro)*
 
@@ -1133,6 +1259,22 @@ prices and widgets that add up the estimated cost of acquiring it (used/new).
 - If a saved figure belongs to a **set from your collection** and is still
   missing there, the card says **🧩 missing from your set: \<set name\>**.
   Tapping the set jumps straight to it in the collection.
+- **🧩 Part by part** (since 3.9.0): if you already have some parts of a
+  figure you want – say the head and torso, only the legs are missing – tick
+  them off here. The card then shows **🧱 In progress 2/4**. The ticks sync
+  to the iOS app as well. The parts come from the catalogue's parts file, or
+  from BrickLink if a key is set up.
+  You can also tick parts off **straight from the search and from a figure's
+  fact sheet** (since 3.9.14): the first tick adds the figure to your
+  wishlist. Untick everything and it stays there.
+- **🧍 Part of these minifigures** (since 3.9.14): when you find a part
+  under "Part", its window lists the minifigures it belongs to. Tap one to
+  open its fact sheet and carry on with "Part by part".
+- **👯 Easily mixed up with:** the fact sheet of a figure lists figures that
+  differ from it in just **one** part, and which part that is – for example
+  sw1423, which differs from sw1422 only by the rangefinder on the helmet.
+  If only the head differs and both wear a helmet, it says that you can only
+  tell them apart without the helmet.
 
 ---
 
@@ -1690,7 +1832,7 @@ your own instance:
 - **🧩 A good match** – members with the same favourite themes.
 
 **Profiles.** Tapping a name – in Discover or on any offer – opens the profile:
-about, area, favourite themes, the **trade record** (offers and completed
+about, country, area, favourite themes, the **trade record** (offers and completed
 trades, counted by the hub) and, if shared, the rounded collection size.
 Below it, what the member offers and – if shown – is looking for; whatever is
 on your wishlist or spare with you is outlined in yellow.
@@ -1744,6 +1886,13 @@ Under **📤 I offer** in the **Trade** tab is what goes into the network:
   **💶 Sale** or **both**. Everything starts as trade. The other side sees the
   kind on the card, **🔎 Offers** can be filtered by it, and for a pure sale
   the request suggests buying instead of swapping.
+
+- **Country.** If you enter your country under **My profile**, it appears
+  with its flag on all your offers. **🔎 Offers** can be filtered by country
+  or continent; only countries that currently have offers are listed. Members
+  without a country don't show up while a filter is set. If your price region
+  is a country, it is preselected in the profile – but it only goes to the hub
+  once you save the profile.
 
 The selection only becomes visible through **"📤 Offer in the network"**
 (admin). Until then nothing changes in the network. Custom figures travel with
@@ -1956,16 +2105,16 @@ So it is clear what happens by itself, and when:
 
 **Fetching prices.** BrickLink average prices (new & used) are fetched:
 (1) immediately when an item is added, (2) manually via "update prices" in the
-details, (3) automatically by the **background job**: it runs every **12
-hours** and takes on items whose prices are older than **7 days**, oldest
-first, with a 2 s pause per request so as not to burden BrickLink.
+details, (3) on opening, when the stored price is due, (4) automatically by
+the **background job**: it runs **every hour** and takes on items whose
+prices are older than set ("Fetch prices every … hours", 24 by default),
+oldest first, with a 2 s pause per request.
 
 **How many per run depends on the collection.** Enough to get through
-everything once in seven days, at least **40** and at most **400**. Up to
-2.78.x it was a fixed 40 – two runs a day meant 80 prices, so anyone with
-more than 560 items never got through in time. From about **5,600 items**
-the cap bites and a full round takes longer than seven days again: better an
-honest backlog than a blocked BrickLink account.
+everything once per interval, at most 72 per hour across all lists. That is
+just over **1,700 items a day**; beyond that the rest shows "See price on
+BrickLink" – better that than a blocked BrickLink account. Up to 3.9.16 the
+job ran every 12 hours for prices older than seven days.
 
 **Names for the catalogue dump.** The published dump carries item numbers and
 image descriptions but **no names** – each instance looks those up through its
@@ -2059,7 +2208,9 @@ price – everything else looks after itself.
 ### 13.1 Price region and currency
 
 By default BrickLink delivers the **worldwide** average in euros. Under
-**More → 🌍 Price region** (admin) you can set both sides:
+**More → 💶 Prices** (admin) you can set both sides. With the price service
+Nupplo converts itself, using the ECB rates that come with the price
+list; with your own access it works as described below:
 
 **Region** – 21 countries (Germany, Austria, Switzerland, United Kingdom,
 Ireland, United States, Canada, Australia, New Zealand, Netherlands, Belgium,
@@ -2122,10 +2273,10 @@ price afterwards really was never sold anywhere; such items honestly stay as
 ### 13.2 The price log
 
 **More → 📈 Price log** *(Collector-Pro)* lists the most recent recordings with
-time, item, prices and source (`auto` or `manual`). Above it is stated **for
-how many items the price fetch is older than seven days** – so you see at a
-glance how current the valuation of your collection is. If all prices are
-fresh, a confirmation appears there instead.
+time, item, prices and source (`auto` or `manual`); from the price service
+only the **last 26 hours**. Above it is stated **how many items have no current price right
+now** – so you see at a glance how complete the valuation of your collection
+is. If all prices are current, a confirmation appears there instead.
 
 ---
 
@@ -2400,7 +2551,7 @@ that `docker compose pull` really fetched a new image.
 **Prices missing on individual items.** Manual numbers have no BrickLink
 equivalent. Freshly imported items are served in portions of 40 – be patient or
 press the **↻** on the "market prices" block in the detail popup. No prices at
-all? → More → API keys → "Test connection".
+all? → More → Prices → check the source, then "Test connection".
 
 **Printed parts.** The two catalogues count printings differently: the Gungan
 shield is `2586pr0028` on Rebrickable and `2586ps1` on BrickLink, the carbonite
@@ -2420,7 +2571,10 @@ it.
 **Login no longer works / user forgotten.** You change your own password via
 the profile popup (tap your name at the top right); forgotten passwords are
 reset by the admin in user management. If the admin themselves is locked out:
-restore the last backup or copy `data/brickfolio.db` back from a backup.
+restore the last backup or copy `data/brickfolio.db` back from a backup –
+with the container stopped, and delete `brickfolio.db-wal` and
+`brickfolio.db-shm` next to it first. They belong to the old state; together
+with a copied-back file they corrupt the database.
 
 **The camera does not open.** Close the PWA once and reopen it; check the
 browser's camera permission. On iOS camera access only works through Safari or

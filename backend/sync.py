@@ -26,6 +26,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 import core
+import integrations
 
 router = APIRouter()
 
@@ -93,6 +94,13 @@ def migrieren(conn) -> None:
     Die Trigger werden jedes Mal neu angelegt (DROP + CREATE): Ändert sich
     ihre Fassung mit einem Update, gilt sofort die neue.
     """
+    # Tagesverbrauch an BrickLink-Abrufen je Gerät, für Geräte mit demselben
+    # Schlüssel (25.11.2026). Nur Zahlen und ein Abdruck des Schlüssels.
+    conn.execute("CREATE TABLE IF NOT EXISTS bl_verbrauch ("
+                 "tag TEXT NOT NULL, schluessel TEXT NOT NULL, geraet TEXT NOT NULL, "
+                 "n INTEGER NOT NULL, erschoepft INTEGER NOT NULL DEFAULT 0, "
+                 "zuletzt INTEGER NOT NULL, PRIMARY KEY (tag, schluessel, geraet))")
+    conn.execute("DELETE FROM bl_verbrauch WHERE tag < date('now', '-3 days')")
     conn.execute("CREATE TABLE IF NOT EXISTS sync_stand ("
                  "id INTEGER PRIMARY KEY CHECK (id = 1), rev INTEGER NOT NULL)")
     conn.execute("INSERT OR IGNORE INTO sync_stand (id, rev) VALUES (1, 0)")
@@ -259,10 +267,15 @@ def _benutzer():
 
 @router.get("/api/sync/info")
 def info(user: dict = Depends(_benutzer())):
+    import main
     with core.db() as conn:
         return {"protocol": PROTOKOLL, "rev": _gesamt_stand(conn),
                 "epoch": core.get_setting("sync_epoch"),
                 "dealer": bool(user["is_dealer"]),
+                # Damit die Geräte zeigen können, mit welcher Nupplo sie
+                # abgleichen (18.10.2026). Leer, solange keiner gesetzt
+                # ist; ältere Geräte lesen das Feld nicht.
+                "name": main._owner_name(),
                 "tables": [t for t, i in TABELLEN.items()
                            if user["is_dealer"] or not i.get("nur_haendler")]}
 
@@ -401,8 +414,17 @@ def _anwenden(conn, c: Aenderung, karten: _Karten, user: dict, haendler: bool,
     if not haendler and t == "shopping_lists":
         raise _Abgelehnt("forbidden", "Einkaufslisten ändern nur Sammlerprofis")
     if not haendler and t == "shopping_items":
-        if row is None or c.deleted or not set(c.fields) <= VERBUCHEN_SPALTEN:
+        if row is None or c.deleted:
             raise _Abgelehnt("forbidden", "Einkaufslisten ändern nur Sammlerprofis")
+        # Die Apps schicken immer die ganze Zeile, nicht nur das Verbuchte.
+        # Wer nur auf die drei Verbuchen-Felder prüfte, lehnte jedes Abhaken
+        # vom iPhone ab – die App hielt den Posten für erledigt, die Instanz
+        # nicht (Durchsicht 17.10.2026). Unveränderte Felder sind deshalb
+        # erlaubt, und geschrieben wird nur, was verbucht werden darf.
+        stand = _satz(t, row, karten, haendler)["fields"]
+        if any(stand.get(k) != v for k, v in c.fields.items() if k not in VERBUCHEN_SPALTEN):
+            raise _Abgelehnt("forbidden", "Einkaufslisten ändern nur Sammlerprofis")
+        c.fields = {k: v for k, v in c.fields.items() if k in VERBUCHEN_SPALTEN}
 
     # Schon weg ist so gut wie gelöscht – vor der Konfliktprüfung: Ein
     # Kaufposten, dessen Eintrag eben mitgelöscht wurde, ist kein Konflikt.
@@ -428,6 +450,15 @@ def _anwenden(conn, c: Aenderung, karten: _Karten, user: dict, haendler: bool,
         raise _Abgelehnt("conflict", server=server_fassung())
 
     werte = _eingang(conn, t, c.fields, karten, user, haendler)
+    # Marktpreise führt allein die Instanz (3.9.33). Ein Gerät, das seine
+    # Preise selbst verfallen ließ, schickte die Zeilen mit leerem Preis
+    # zurück und löschte damit den Preis der Instanz – am 08.11.2026 bei
+    # 464 Einträgen einer Sammlung, während BrickLink ausfiel. Geprüft wird
+    # trotzdem vorher (in `_eingang`): Unsinn wird weiter abgewiesen. Nur
+    # hier beim Push, nicht in `_eingang` selbst: Das nutzt auch der Abgleich
+    # am Rechner beim Holen, und dort sollen die Preise der SE ankommen.
+    for s in MARKTPREIS_SPALTEN:
+        werte.pop(s, None)
     # Doppelter Artikel unter anderer UUID? Die Gegenstelle führt zusammen, nicht
     # die Instanz – so bleibt die Regel an einer Stelle.
     schluessel = info.get("schluessel")
@@ -502,6 +533,8 @@ def _eingang(conn, t: str, felder: dict, karten: _Karten, user: dict, haendler: 
 
 
 _PREISE = {"price_new", "price_used", "paid_price", "unit_price"}
+MARKTPREIS_SPALTEN = {"price_new", "price_used", "price_data", "price_updated_at",
+                      "price_region", "price_currency"}
 
 
 def _pruefen(t: str, werte: dict) -> None:
@@ -606,3 +639,47 @@ def katalog(seit: int = Query(0, ge=0), nach: str = "",
                 "SELECT item_id, bl_no FROM bl_nummern WHERE checked_at > ?",
                 (seit,))]
     return antwort
+
+
+# ------------------------------------------------------------ BrickLink-Verbrauch
+
+class Verbrauch(BaseModel):
+    tag: str = Field(pattern=r"^\d{4}-\d{2}-\d{2}$")
+    schluessel: str = Field(pattern=r"^[0-9a-f]{20}$")
+    geraet: str = Field(min_length=1, max_length=80)
+    n: int = Field(ge=0, le=100000)
+    erschoepft: bool = False
+
+
+@router.post("/api/sync/bl-verbrauch")
+def bl_verbrauch(body: Verbrauch, user: dict = Depends(_benutzer())):
+    """Ein Gerät meldet, wie viele BrickLink-Abrufe es heute mit diesem
+    Schlüssel gemacht hat, und erfährt, was die anderen verbraucht haben.
+
+    Mehrere Geräte mit demselben eigenen Schlüssel teilen sich BrickLinks
+    5.000 am Tag, sehen einander aber nicht. Die SE ist die Stelle, die alle
+    erreichen. Gemeldet wird der Stand, nicht der Zuwachs – doppelt gemeldet
+    schadet so nicht. Nutzt die SE selbst denselben Schlüssel, zählt ihr
+    eigener Verbrauch mit."""
+    jetzt = int(time.time())
+    with core.db() as conn:
+        conn.execute(
+            "INSERT INTO bl_verbrauch (tag, schluessel, geraet, n, erschoepft, zuletzt) "
+            "VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (tag, schluessel, geraet) DO UPDATE SET "
+            "n = MAX(n, excluded.n), erschoepft = MAX(erschoepft, excluded.erschoepft), "
+            "zuletzt = excluded.zuletzt",
+            (body.tag, body.schluessel, body.geraet, body.n, int(body.erschoepft), jetzt))
+        zeilen = conn.execute(
+            "SELECT geraet, n, erschoepft, zuletzt FROM bl_verbrauch "
+            "WHERE tag = ? AND schluessel = ? AND geraet <> ?",
+            (body.tag, body.schluessel, body.geraet)).fetchall()
+    andere = [{"geraet": r["geraet"], "n": r["n"], "erschoepft": bool(r["erschoepft"]),
+               "zuletzt": r["zuletzt"]} for r in zeilen]
+    if integrations.schluessel_abdruck() == body.schluessel \
+            and time.strftime("%Y-%m-%d") == body.tag:
+        andere.append({"geraet": "Nupplo SE", "n": integrations.verbrauch_heute(),
+                       "erschoepft": core.get_setting("bl_erschoepft_tag") == body.tag,
+                       "zuletzt": int(core.get_setting("bl_verbrauch_zuletzt") or 0)})
+    return {"tag": body.tag, "andere": andere,
+            "summe": sum(a["n"] for a in andere),
+            "erschoepft": any(a["erschoepft"] for a in andere)}

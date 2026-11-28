@@ -53,7 +53,7 @@ def test_die_galerie_faellt_auf_das_kartenbild_zurueck():
 
 def test_der_rueckfall_wird_beim_oeffnen_gemerkt():
     js = APP_JS.read_text()
-    m = re.search(r"function openGallery\(startUrl, gid, gtype\) \{.*?\n\}\n",
+    m = re.search(r"function openGallery\(startUrl, gid, gtype[^)]*\) \{.*?\n\}\n",
                   js, re.S)
     assert m
     assert "ersatz: startUrl" in m.group(0)

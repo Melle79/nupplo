@@ -1338,6 +1338,15 @@ WOERTERBUCH.update({
     "raecher": ("avengers",), "todesstern": ("death star",),
     "sternzerstoerer": ("star destroyer",),
     "sternenzerstoerer": ("star destroyer",),
+    # Wörter aus deutschen Setnamen, die fehlten oder falsch zerfielen
+    # (10.10.2026): „Hauptquartier" endete über den Kopf „-tier" als
+    # `animal`, „Abfangjäger" als `hunter`, „Imperialer Sternzerstörer"
+    # behielt „Imperialer" als Pflichtwort und fand nichts.
+    "imperial": ("imperial",), "hauptquartier": ("headquarters",),
+    "abfangjaeger": ("interceptor",), "schlachtschiff": ("battleship",),
+    "laeufer": ("walker",), "basis": ("base",),
+    "erweiterung": ("expansion",), "modulgebaeude": ("modular building",),
+    "sammleredition": ("collector",),
     "sturmtruppler": ("stormtrooper",), "schneetruppler": ("snowtrooper",),
     "klonkrieger": ("clone trooper", "clone"),
     "imperium": ("empire", "imperial"), "republik": ("republic",),
@@ -1526,6 +1535,34 @@ def nachschlagen(wort: str) -> tuple:
     return _direkt(wort) or _zerlegen(wort) or _kopf(wort)
 
 
+def _fassungen(wort: str) -> tuple:
+    """Wie `nachschlagen`, aber ein zerlegtes Wort bleibt **ein** Begriff.
+
+    `nachschlagen` gibt Entsprechungen zurück, die einander **ersetzen** –
+    `uebersetzen` macht aus jeder eine eigene Suchanfrage. Ein zerlegtes Wort
+    lieferte aber seine beiden Hälften in dieser Form: „Kampfdroide" wurde zu
+    zwei Suchen, `battle` und `droid`, und fand jeden Droiden und alles mit
+    „Battle" im Namen statt der Kampfdroiden. „Supersternenzerstörer" fand so
+    jeden Sternzerstörer, aber nicht den einen (10.10.2026, am Beispiel
+    „Supersternzerstörer Executor").
+
+    Hier werden die Hälften zu einem Begriff zusammengezogen. Der hintere
+    Teil folgt als Ausweichfassung, denn er trägt im Deutschen die Bedeutung:
+    Findet `protocol droid` nichts, ist `droid` noch immer richtiger als
+    nichts.
+    """
+    wort = (wort or "").strip().lower()
+    if not wort:
+        return ()
+    direkt = _direkt(wort)
+    if direkt:
+        return direkt
+    zerlegt = _zerlegen(wort)
+    if zerlegt:
+        return (" ".join(zerlegt), zerlegt[-1])
+    return _kopf(wort)
+
+
 # Wörter, die aus der Anfrage **verschwinden**, statt übersetzt zu werden.
 #
 # „Jedi mit gelbem Kopf und braunem Umhang" – „mit" und „und" tragen hier
@@ -1580,7 +1617,7 @@ def uebersetzen(q, nur_ganz: bool = False) -> list:
         return []
     teile, getroffen, luecken = [], False, 0
     for w in woerter:
-        treffer = nachschlagen(w)
+        treffer = _fassungen(w)
         if treffer:
             getroffen = True
             teile.append(list(treffer))

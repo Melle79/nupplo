@@ -352,11 +352,18 @@ def publish(offers: list) -> dict:
 
 
 def offers(params: dict | None = None) -> list:
+    return offers_mit_laendern(params).get("offers", [])
+
+
+def offers_mit_laendern(params: dict | None = None) -> dict:
+    """Wie `offers`, aber mit `laender` (Hub 1.30.0): welche Länder es mit
+    wie vielen Angeboten gibt – ungefiltert, für die Auswahl."""
     qs = ""
     if params:
         from urllib.parse import urlencode
-        qs = "?" + urlencode({k: v for k, v in params.items() if v})
-    return _authed("GET", "/v1/offers" + qs).get("offers", [])
+        werte = {k: v for k, v in params.items() if v}
+        qs = "?" + urlencode(werte) if werte else ""
+    return _authed("GET", "/v1/offers" + qs)
 
 
 def members() -> list:

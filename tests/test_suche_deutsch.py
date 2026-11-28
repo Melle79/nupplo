@@ -471,3 +471,24 @@ def test_eigene_sammlung_findet_ueber_die_bildbeschreibung(client, monkeypatch):
             " ('sw1479', 'minifig', 'Hot Tub Stormtrooper', 'i', 'b', 2, 'used', 0)")
     r = client.get("/api/collection/suggest", params={"q": "Badehose"}).json()
     assert [e["item_id"] for e in r["items"]] == ["sw1479"]
+
+
+def test_zerlegtes_wort_bleibt_ein_suchbegriff():
+    """„Supersternzerstörer Executor" (10.10.2026): Die beiden Hälften eines
+    zerlegten Worts wurden zu zwei getrennten Suchen – `super executor` und
+    `star destroyer executor`. Allein getippt fand „Supersternenzerstörer"
+    damit jeden Sternzerstörer und „Kampfdroide" jeden Droiden. Sie gehören
+    zusammen in einen Begriff; der hintere Teil bleibt als Ausweichfassung."""
+    assert woerterbuch.uebersetzen("Kampfdroide") == ["battle droid", "droid"]
+    assert woerterbuch.uebersetzen("Supersternzerstörer Executor")[0] \
+        == "super star destroyer executor"
+
+
+def test_woerter_aus_deutschen_setnamen():
+    """„Hauptquartier" fand über das Wortende „-tier" Tiere, „Abfangjäger"
+    Jäger, und „Imperialer" blieb als unbekanntes Pflichtwort stehen
+    (10.10.2026)."""
+    assert woerterbuch.uebersetzen("Hauptquartier") == ["headquarters"]
+    assert woerterbuch.uebersetzen("TIE Abfangjäger") == ["tie interceptor"]
+    assert woerterbuch.uebersetzen("Imperialer Sternzerstörer") \
+        == ["imperial star destroyer"]

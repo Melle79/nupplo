@@ -71,8 +71,11 @@ def test_alle_ansichten_sind_erfasst():
     liste = re.search(r"const DIAG_ANSICHTEN = \[([^\]]*)\]", j, re.S)
     assert liste, "DIAG_ANSICHTEN fehlt"
     erfasst = set(re.findall(r'"(\w+)"', liste.group(1)))
+    # Seit dem Live-Scanner (Windows 0.5.1) steht vor der Liste noch die
+    # Umleitung von „live“ auf die Scan-Ansicht; gesucht wird die Liste,
+    # über die `showTab` die Ansichten umschaltet.
     umschalter = re.search(
-        r'function showTab\(name\) \{\s*\[([^\]]*)\]', j, re.S)
+        r'function showTab\(name\) \{.*?\[([^\]]*)\]\.forEach', j, re.S)
     gezeigt = set(re.findall(r'"(\w+)"', umschalter.group(1)))
     assert erfasst == gezeigt, (
         f"nur in showTab: {gezeigt - erfasst}, nur in DIAG: {erfasst - gezeigt}")

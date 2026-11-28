@@ -1132,6 +1132,12 @@ function wireHubViewOnce() {
       loadHubOffers();
     });
   });
+  if ($("hub-land-filter")) {
+    $("hub-land-filter").addEventListener("change", (ev) => {
+      hubLandFilter = ev.target.value;
+      loadHubOffers();
+    });
+  }
   // Suche im Netzwerk – kurz abwarten, damit nicht jeder Tastendruck fragt
   let hubSearchTimer;
   $("hub-search").addEventListener("input", () => {
@@ -1428,6 +1434,16 @@ function laufendeGespraeche(trades) {
     .map((t) => [offerKey(t.other_id, t.item_id, t.condition), t]));
 }
 
+function cmAngebotsAbfrage(q) {
+  const teile = [];
+  if (q) teile.push("q=" + encodeURIComponent(q));
+  if (hubLandFilter) {
+    const [art, wert] = hubLandFilter.split(":");
+    teile.push((art === "land" ? "land=" : "kontinent=") + encodeURIComponent(wert));
+  }
+  return teile.length ? "?" + teile.join("&") : "";
+}
+
 async function loadHubOffers() {
   const seq = ++hubSearchSeq;      // ältere Suchen dürfen nicht überholen
   const box = $("hub-offers");
@@ -1437,16 +1453,18 @@ async function loadHubOffers() {
     // Angebote und eigene Vorgänge zusammen holen, damit an der Karte gleich
     // steht, wo schon ein Gespräch läuft.
     const [offerRes, tradeRes] = await Promise.all([
-      api("/hub/offers" + (q ? `?q=${encodeURIComponent(q)}` : "")),
+      api("/hub/offers" + cmAngebotsAbfrage(q)),
       api("/hub/trades").catch(() => ({ trades: [] })),
     ]);
     const offers = offerRes.offers.filter((o) => cmArtPasst(o.deal));
     tradeByOffer = laufendeGespraeche(tradeRes.trades);
     if (seq !== hubSearchSeq) return;
+    cmLandFilterZeichnen(offerRes.laender);
     if (!offers.length) {
       box.innerHTML = `<p class="search-hint">${q
         ? `Nichts gefunden zu „${esc(q)}".`
         : hubArtFilter ? esc(tr("Keine Angebote dieser Art."))
+        : hubLandFilter ? esc(tr("Keine Angebote aus dieser Gegend."))
         : "Noch keine Angebote von anderen im Netzwerk."}</p>`;
       return;
     }
@@ -1462,6 +1480,7 @@ async function loadHubOffers() {
             <div class="sub">${esc(o.item_id)}${o.condition ? " · " + (o.condition === "new" ? tr("Neu") : tr("Gebraucht")) : ""}${o.qty > 1 ? " · " + o.qty + "×" : ""}</div>
             </div>
             <span class="badge badge-owned">von <button type="button" class="cm-name" data-profil="${esc(o.member_id)}">${esc(o.display_name)}</button></span>
+            ${o.country ? `<span class="badge cm-land-schild">${esc(cmLand(o.country))}</span>` : ""}
             <span class="badge cm-art-schild">${esc(cmArtName(o.deal) + cmPreis(o))}</span>
             ${t ? `<span class="badge badge-wanted">💬 angefragt · ${tradeStatusText(t.status)}${t.unread ? ` · ${t.unread} neu` : ""}</span>` : ""}
           </div>
@@ -1575,6 +1594,98 @@ function cmArtName(art) {
 }
 
 let hubArtFilter = "";               // "" | "tausch" | "verkauf"
+let hubLandFilter = "";              // "" | "land:DE" | "kontinent:europe"
+
+/* Länder und Kontinente (Hub 1.30.0). Gespeichert wird das ISO-Kürzel; den
+   Namen liefert der Browser in der Sprache der Oberfläche – so braucht kein
+   Land einen Eintrag in den Übersetzungen. Die Liste ist die des Hubs: Was
+   er nicht kennt, würde er verwerfen. Den Kontinent leitet der Hub ab. */
+const CM_LAENDER = [
+  "AD", "AE", "AF", "AG", "AI", "AL", "AM", "AO", "AR", "AS", "AT", "AU", "AW",
+  "AX", "AZ", "BA", "BB", "BD", "BE", "BF", "BG", "BH", "BI", "BJ", "BL", "BM",
+  "BN", "BO", "BQ", "BR", "BS", "BT", "BW", "BY", "BZ", "CA", "CD", "CF", "CG",
+  "CH", "CI", "CK", "CL", "CM", "CN", "CO", "CR", "CU", "CV", "CW", "CY", "CZ",
+  "DE", "DJ", "DK", "DM", "DO", "DZ", "EC", "EE", "EG", "EH", "ER", "ES", "ET",
+  "FI", "FJ", "FK", "FM", "FO", "FR", "GA", "GB", "GD", "GE", "GF", "GG", "GH",
+  "GI", "GL", "GM", "GN", "GP", "GQ", "GR", "GT", "GU", "GW", "GY", "HK", "HN",
+  "HR", "HT", "HU", "ID", "IE", "IL", "IM", "IN", "IQ", "IR", "IS", "IT", "JE",
+  "JM", "JO", "JP", "KE", "KG", "KH", "KI", "KM", "KN", "KP", "KR", "KW", "KY",
+  "KZ", "LA", "LB", "LC", "LI", "LK", "LR", "LS", "LT", "LU", "LV", "LY", "MA",
+  "MC", "MD", "ME", "MF", "MG", "MH", "MK", "ML", "MM", "MN", "MO", "MP", "MQ",
+  "MR", "MS", "MT", "MU", "MV", "MW", "MX", "MY", "MZ", "NA", "NC", "NE", "NF",
+  "NG", "NI", "NL", "NO", "NP", "NR", "NU", "NZ", "OM", "PA", "PE", "PF", "PG",
+  "PH", "PK", "PL", "PM", "PN", "PR", "PS", "PT", "PW", "PY", "QA", "RE", "RO",
+  "RS", "RU", "RW", "SA", "SB", "SC", "SD", "SE", "SG", "SH", "SI", "SJ", "SK",
+  "SL", "SM", "SN", "SO", "SR", "SS", "ST", "SV", "SX", "SY", "SZ", "TC", "TD",
+  "TG", "TH", "TJ", "TK", "TL", "TM", "TN", "TO", "TR", "TT", "TV", "TW", "TZ",
+  "UA", "UG", "UM", "US", "UY", "UZ", "VA", "VC", "VE", "VG", "VI", "VN", "VU",
+  "WF", "WS", "XK", "YE", "YT", "ZA", "ZM", "ZW"
+];
+const CM_KONTINENTE = [
+  ["europe", "Europa"], ["north_america", "Nordamerika"],
+  ["south_america", "Südamerika"], ["asia", "Asien"], ["africa", "Afrika"],
+  ["oceania", "Ozeanien"],
+];
+
+function cmKontinentName(k) {
+  const x = CM_KONTINENTE.find((e) => e[0] === k);
+  return x ? tr(x[1]) : k;
+}
+
+function cmLandName(code) {
+  if (!code) return "";
+  try {
+    return new Intl.DisplayNames([dateLocale()], { type: "region" }).of(code) || code;
+  } catch (e) { return code; }
+}
+
+/* Fahne aus den zwei Buchstaben. Windows zeigt statt der Fahne die
+   Buchstaben – deshalb steht der Name immer daneben. */
+function cmFahne(code) {
+  if (!/^[A-Z]{2}$/.test(code || "")) return "";
+  return String.fromCodePoint(...[...code].map((c) => 0x1F1A5 + c.charCodeAt(0)));
+}
+
+function cmLand(code) {
+  return code ? cmFahne(code) + " " + cmLandName(code) : "";
+}
+
+/* Auswahl für den Filter: nur Kontinente und Länder, aus denen es gerade
+   Angebote gibt. Steht der Filter auf etwas, das es nicht mehr gibt, bleibt
+   es trotzdem wählbar – sonst sprang die Auswahl stumm auf „Alle“, während
+   die Liste noch gefiltert war. */
+function cmLandFilterZeichnen(laender) {
+  const sel = $("hub-land-filter");
+  if (!sel) return;
+  const kontinente = {};
+  (laender || []).forEach((l) => {
+    if (l.continent) kontinente[l.continent] = (kontinente[l.continent] || 0) + l.offers;
+  });
+  const opt = (wert, text) =>
+    `<option value="${esc(wert)}"${wert === hubLandFilter ? " selected" : ""}>${esc(text)}</option>`;
+  const k = Object.keys(kontinente)
+    .sort((a, b) => cmKontinentName(a).localeCompare(cmKontinentName(b)));
+  const l = (laender || []).map((x) => x.country)
+    .sort((a, b) => cmLandName(a).localeCompare(cmLandName(b)));
+  const html = [opt("", tr("Alle Länder"))];
+  if (k.length) {
+    html.push(`<optgroup label="${esc(tr("Kontinent"))}">${k.map((x) =>
+      opt("kontinent:" + x, cmKontinentName(x))).join("")}</optgroup>`);
+  }
+  if (l.length) {
+    html.push(`<optgroup label="${esc(tr("Land"))}">${l.map((x) =>
+      opt("land:" + x, cmLand(x))).join("")}</optgroup>`);
+  }
+  const bekannt = !hubLandFilter || k.some((x) => "kontinent:" + x === hubLandFilter)
+    || l.some((x) => "land:" + x === hubLandFilter);
+  if (!bekannt) {
+    const [art, wert] = hubLandFilter.split(":");
+    html.push(opt(hubLandFilter, art === "land" ? cmLand(wert) : cmKontinentName(wert)));
+  }
+  sel.innerHTML = html.join("");
+  // Gibt es (noch) kein Land im Netzwerk, ist die Auswahl nur Ballast.
+  sel.hidden = !l.length && !hubLandFilter;
+}
 
 function cmArtPasst(art) {
   const a = art || "tausch";
@@ -1651,6 +1762,7 @@ async function loadEntdecken() {
   } else {
     d.passt.forEach((p) => {
       const zeile = [p.gemeinsam.join(" · ")];
+      if (p.country) zeile.push(cmLand(p.country));
       if (p.region) zeile.push(p.region);
       zeile.push(tr("{n} Angebote", { n: p.offers || 0 }));
       teile.push(`<div class="cm-karte">
@@ -1711,7 +1823,8 @@ async function openProfil(memberId) {
   const seit = p.created_at ? new Date(p.created_at * 1000)
     .toLocaleDateString(dateLocale(), { month: "long", year: "numeric" }) : "";
   const unterzeile = [seit ? tr("Mitglied seit {wann}", { wann: seit }) : ""];
-  if (p.region) unterzeile.push("📍 " + p.region);
+  const wo = [cmLand(p.country), p.region].filter(Boolean).join(" · ");
+  if (wo) unterzeile.push((p.country ? "" : "📍 ") + wo);
   const zahlen = [
     `<div class="cm-zahl"><b>${p.stats ? p.stats.offers : 0}</b><span>${esc(tr("Angebote"))}</span></div>`,
     `<div class="cm-zahl"><b>${p.stats ? p.stats.trades : 0}</b><span>${esc(tr("Tausche"))}</span></div>`,
@@ -1793,6 +1906,17 @@ function cmFelder(p, themen, teile, alleThemen = false) {
         placeholder="${esc(tr("z. B. was du sammelst und wie du am liebsten tauschst"))}">${esc(p.about || "")}</textarea>`);
   }
   if (teile.includes("region")) {
+    // Vorbelegt aus dem Preisgebiet, falls dort ein Land steht. Zum Hub geht
+    // es trotzdem erst mit „Speichern“ – vorher verlässt nichts die Instanz.
+    const land = p.country || p.land_vorschlag || "";
+    const laender = CM_LAENDER.map((c) => [c, cmLandName(c)])
+      .sort((a, b) => a[1].localeCompare(b[1]));
+    html.push(`<label for="cm-land">${esc(tr("Land"))}</label>
+      <select id="cm-land">
+        <option value="">${esc(tr("keine Angabe"))}</option>
+        ${laender.map(([c, n]) => `<option value="${c}"${c === land ? " selected" : ""}>${esc(cmFahne(c) + " " + n)}</option>`).join("")}
+      </select>
+      <small class="search-hint">${esc(tr("Steht an deinen Angeboten. Andere können danach filtern."))}</small>`);
     html.push(`<label for="cm-region">${esc(tr("Gegend"))}</label>
       <input id="cm-region" maxlength="60" value="${esc(p.region || "")}"
         placeholder="${esc(tr("z. B. Raum München – keine Adresse"))}">`);
@@ -1829,6 +1953,8 @@ function cmFelderLesen(p) {
     show_collection: !!p.show_collection };
   if ($("cm-about")) neu.about = $("cm-about").value.trim();
   if ($("cm-region")) neu.region = $("cm-region").value.trim();
+  // Ohne Feld kein `country` – dann lässt der Hub das gespeicherte stehen.
+  if ($("cm-land")) neu.country = $("cm-land").value;
   if ($("cm-themen")) {
     neu.themes = [...document.querySelectorAll("#cm-themen .cm-chip.an")]
       .map((b) => b.dataset.thema);

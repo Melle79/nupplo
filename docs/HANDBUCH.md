@@ -51,7 +51,13 @@ Datenbank, jeder mit eigenem Login.
 Nach außen fragt die App nur dort, wo sie muss: beim Scannen (Brickognize),
 bei der Namenssuche (Rebrickable) und für Preise und Set-Inhalte
 (BrickLink). Für die beiden letzten brauchst du eigene kostenlose Zugänge –
-siehe 2.4. Ohne sie läuft alles andere weiter.
+siehe 2.4. Ohne sie läuft alles andere weiter. Erscheinung, EOL und UVP kommen
+mit dem Katalog; der Steckbrief fragt dafür niemanden. Zwei Schalter unter
+**Mehr → Angebotspreise**, beide voreingestellt aus, ändern das: Mit
+**Angebotspreise von Brickmerge zeigen** holt der Server beim Öffnen eines
+Set-Steckbriefs dessen Brickmerge-Seite für den Preis (je Set höchstens
+einmal am Tag), mit **Setbilder von Brickmerge zeigen** lädt dein Browser
+die weiteren Setbilder direkt bei Brickmerge.
 
 **Ein Punkt, der leicht übersehen wird: die Bilder.** In der Datenbank steht
 zu jedem Artikel nur die *Adresse* seines Katalogbildes. Geholt wurde es
@@ -153,12 +159,17 @@ den Rest:
 1. **Anzeigename** – der Name in Logo, Fenstertitel, **App-Symbol**, im
    kleinen Symbol im Browser-Reiter und im Namen auf dem Startbildschirm
    des Handys („Annas Nupplo")
-2. **Preisgebiet und Währung** – aus welchem Markt die Ø-Preise kommen und
-   in welcher Währung; vorausgewählt ist, was zu den Spracheinstellungen des
-   Browsers passt (siehe Kapitel 13.1)
-3. **Rebrickable-Schlüssel** – für die Suche nach Namen, mit Direktlink
-4. **BrickLink-Zugang** – die vier Werte für Preise und Set-Inhalte
-5. **Verbindung prüfen** – ein echter Testabruf bei beiden Diensten; so
+2. **Preise** – ohne eigenen Schlüssel oder mit (dann „Preise holen alle
+   … Stunden“, vorgegeben 24), dazu Gebiet und Währung. Der Schritt erklärt, was
+   ohne Schlüssel geht (Star Wars und Herr der Ringe) und wie man einen
+   bekommt. Vorausgewählt ist bei Gebiet und Währung, was zu den
+   Spracheinstellungen des Browsers passt (siehe Kapitel 2.4 und 13.1)
+3. **Rebrickable-Schlüssel** (freiwillig) – für die Suche nach Sets, Teilen
+   und ganz neuen Figuren, mit Direktlink
+4. **Eigener BrickLink-Zugang** (freiwillig) – die vier Werte; nötig für
+   Preise nur, wenn du ihn in Schritt 2 gewählt hast, außerdem für
+   Set-Inhalte und Namen beim Erfassen
+5. **Verbindung prüfen** – ein echter Test bei jedem Dienst; so
    fällt ein verdrehter Schlüssel sofort auf und nicht erst beim ersten Scan
 6. **Tausch-Netzwerk** – falls dich jemand eingeladen hat (siehe Kapitel 12)
 7. **Absichern mit Zwei-Faktor** – empfohlen, sobald die App von außen
@@ -167,9 +178,9 @@ den Rest:
 8. **Fertig**
 
 **Jeder Schritt ist überspringbar**, und unten steht „Assistent beenden und
-direkt loslegen". Ohne Schlüssel funktioniert alles außer Preisen,
-Set-Inhalten und der Namenssuche – das **Scannen braucht keinen einzigen
-Schlüssel**. Nachtragen lässt sich alles unter *Mehr → API-Schlüssel*.
+direkt loslegen". Das **Scannen braucht keinen einzigen Schlüssel**, Preise
+gibt es über den Preisdienst auch ohne. Nachtragen lässt sich alles unter
+*Mehr → Preise* und *Mehr → Katalogsuche*.
 
 Der Assistent läuft genau einmal, direkt nach dem Anlegen des Admin-Kontos.
 
@@ -196,14 +207,40 @@ wie vorher.
 *Für unbeaufsichtigte Setups:* Sind die Umgebungsvariablen
 `ADMIN_USER`/`ADMIN_PASSWORD` gesetzt, legt Nupplo den Admin beim
 allerersten Start automatisch an; dann entfällt der Assistent und die
-Schlüssel kommen entweder aus Umgebungsvariablen oder aus *Mehr →
-API-Schlüssel*.
+Schlüssel kommen entweder aus Umgebungsvariablen oder aus *Mehr → Preise*
+bzw. *Mehr → Katalogsuche*. Ohne BrickLink-Schlüssel kommen die Preise vom
+Preisdienst (seit 3.9.17 ohne Wahl, `PREISQUELLE` zählt nicht mehr).
 
-### 2.4 API-Schlüssel einrichten (Admin)
+### 2.4 Preise und Schlüssel einrichten (Admin)
 
-Unter **Mehr → API-Schlüssel** (nur für Admins sichtbar):
+Preise gibt es auf **zwei Wegen, entweder – oder** (seit 3.9.17). Welcher
+gilt, entscheidet allein, ob ein eigener BrickLink-Schlüssel eingetragen
+ist. Unter **Mehr → 💶 Preise** (nur für Admins sichtbar):
 
-**BrickLink** – liefert Ø-Preise, Erscheinungsjahre und Set-Inhalte:
+- **Ohne eigenen Schlüssel: Nupplo-Preisdienst.** Nupplo holt einmal am
+  Tag die ganze Preisliste des eingestellten Gebiets, dazwischen stündlich
+  nur das Neue, und schlägt nur bei sich darin nach. Welche Figuren in der Sammlung liegen, erfährt der
+  Preisdienst nicht. Er kennt **nur Star Wars und Herr der Ringe**, alle
+  Figuren täglich und Sets auf Zuruf: Öffnet jemand ein Set ohne frischen
+  Preis, fragt Nupplo genau diese eine Nummer beim Hub an („Preis ist
+  angefragt“). Der Hub merkt sich nicht, wer gefragt hat. Bei allem
+  anderen steht **„Preis bei BrickLink ansehen“**.
+- **Mit eigenem Schlüssel: BrickLink.** Nupplo holt alle Preise selbst und
+  nimmt nie die des Preisdienstes. Was es holt, geht nie zum Hub. Darunter
+  legst du fest: **„Preise holen alle … Stunden“**, vorgegeben 24, frei
+  wählbar von 1 bis 720. Die Felder stehen auf derselben Karte unter
+  **„🔑 Eigener BrickLink-Zugang“** zum Aufklappen.
+
+**Preise verschwinden nicht (seit 3.9.31).** Figuren- und Setpreise aus
+dem Preisdienst bleiben mit ihrem letzten Preisstand erhalten, bis der
+Preisdienst sie erneuert; ab 48 Stunden steht „Stand <Datum>“ dabei. In der Sammlung
+steht das Datum neben dem Ø-Wert; der Sammlungswert zählt diesen letzten
+bekannten Setpreis weiter mit. Der Preisverlauf erscheint nur neben einem
+aktuellen Preis. Mit eigenem Schlüssel gilt der eingestellte Abstand.
+
+Darunter folgen Gebiet und Währung (Kapitel 13.1).
+
+**Eigener BrickLink-Zugang** – liefert alle Ø-Preise, Erscheinungsjahre, Set-Inhalte und Namen beim Erfassen:
 
 1. Du brauchst ein BrickLink-Konto **mit eröffnetem Shop** – die Store-API
    steht nur Verkäufern offen. Der Shop muss nichts anbieten, er muss nur
@@ -214,7 +251,8 @@ Unter **Mehr → API-Schlüssel** (nur für Admins sichtbar):
    ausfüllen – das erlaubt Zugriff von beliebiger Adresse.
 3. Die vier Werte – *Consumer Key*, *Consumer Secret*, *Token*,
    *Token Secret* – in die vier Felder der App kopieren und speichern.
-4. Darunter steht **Kontaktadresse des Betreibers**. BrickLinks
+4. Ist ein Zugang eingetragen, erscheint darunter **Kontaktadresse des
+   Betreibers** (ohne eigenen Zugang bleibt das Feld weg). BrickLinks
    Nutzungsbedingungen verlangen eine sichtbare Kontaktadresse in der
    Anwendung. **Nicht für BrickLink** – die kennen dich aus der
    Registrierung –, sondern damit **Fremde, die deine Instanz benutzen**,
@@ -240,19 +278,33 @@ Angebotspreis sagt, was sie *kostet*, wenn du jetzt kaufst.
 
 Sie erscheint in der Detailansicht und als kleine Marke in Wunsch- und
 Einkaufslisten – dort für den Zustand, den der Artikel auf der Liste hat
-(„ab … neu“ bzw. „ab … gebraucht“; auf der Wunschliste gebraucht). Voreingestellt ist sie **aus**: Jede Abfrage kostet
-zusätzliche BrickLink-Abrufe, und das Tageslimit liegt bei 5.000.
+(„ab … neu“ bzw. „ab … gebraucht“; auf der Wunschliste gebraucht). Voreingestellt ist sie **aus**: Mit eigenem
+Zugang kostet jede Abfrage zusätzliche BrickLink-Abrufe (Tageslimit 5.000).
+Angebotspreise gibt es seit 3.9.17 **nur mit eigenem Schlüssel**; der Preisdienst führt nur Verkäufe. Ohne Schlüssel fehlen Schalter und „ab“-Zeile ganz.
 Angebotspreise werden **nicht gespeichert** – der Wert deiner Sammlung
 beruht weiter auf Verkäufen.
 
-**Rebrickable** – liefert die Suche nach Namen:
+Gleich darunter: **Angebotspreise von Brickmerge zeigen**. Dann steht bei
+Sets auf dem Blatt **Preise** zusätzlich „Bei Brickmerge: ab … ↗“ – das
+günstigste Angebot dort, ohne Versand. Auch das ist voreingestellt **aus**.
+Nur dafür fragt dein Server beim Öffnen eines Steckbriefs bei Brickmerge;
+alles andere zum Set kommt mit dem Katalog.
+
+Darunter: **Setbilder von Brickmerge zeigen**, ebenfalls voreingestellt
+**aus**. Dann zeigt der Set-Steckbrief eine Reihe weiterer Bilder, die dein
+Browser direkt bei Brickmerge lädt.
+
+**Rebrickable** (freiwillig, **Mehr → 🔎 Katalogsuche**) – findet auch Sets,
+Teile und ganz neue Figuren; Figuren aus dem Katalog-Abzug findest du auch
+ohne:
 
 1. Kostenloses Konto auf rebrickable.com anlegen.
 2. Unter [Account → API](https://rebrickable.com/api/) einen Key erzeugen
-   und ins Feld *Rebrickable Key* eintragen.
+   und ins Feld *Rebrickable-Schlüssel* eintragen.
 
-Zum Abschluss **„Verbindung testen"** drücken – die App prüft beide
-Zugänge und meldet das Ergebnis. Dieselbe Anleitung steckt übrigens auch
+Zum Abschluss **„Verbindung testen"** drücken – die App prüft jeden
+Dienst und meldet das Ergebnis, mit dem Preisdienst auch, ob schon Preise
+geladen sind. Dieselbe Anleitung steckt übrigens auch
 in der App: ❓-Knopf oben rechts → „API-Schlüssel besorgen". Gespeicherte Schlüssel werden maskiert
 angezeigt; ein leeres Feld beim Speichern lässt den vorhandenen Wert
 unverändert. Alternativ können alle Schlüssel als Umgebungsvariablen
@@ -270,7 +322,7 @@ Gerät ab:
   den Weg über *Teilen → „Zum Home-Bildschirm"*.
 - **Über eine reine `http`-Adresse im Heimnetz** erlaubt kein Browser das
   Hinzufügen. Dann sagt die Karte genau das und verweist auf *Mehr →
-  Externer Zugriff* (2.7), womit sich ein verschlüsselter Zugang einrichten
+  Eigener Cloudflare-Tunnel* (2.7), womit sich ein verschlüsselter Zugang einrichten
   lässt.
 
 **Nach unten ziehen lädt neu.** Vom Startbildschirm gestartet fehlt die
@@ -339,17 +391,31 @@ also nur die erste Gruppe und ganz unten die Quellen.
 | | 📤 Export & Druck | alle |
 | | 💼 Sammlerprofi (Angebots-Vorschlag, CSV-Import) | Sammlerprofi |
 | | 📈 Preis-Protokoll | Sammlerprofi |
+| | 🏷 Angebotspreise | alle |
+| | 🔗 Verweise nach draußen (Jedipedia, Bauanleitungen) | alle |
+| | 🐢 Schonender Bildmodus | alle |
 | 🏠 **Diese Instanz** | 🏷 Anzeigename | Admin |
 | | 👥 Benutzer verwalten | Admin |
-| | 🔑 API-Schlüssel | Admin |
-| | 🌍 Preisgebiet & Währung | Admin |
+| | 💶 Preise (Quelle, Gebiet, Währung, eigener BrickLink-Zugang) | Admin |
+| | 🔎 Katalogsuche (Rebrickable) | Admin |
+| | 🤖 Lokale KI für die Suche | Admin |
+| | 📚 Katalog-Abzug | Admin |
 | | 🖼 Bilder auf der Instanz | Admin |
-| 🌐 **Nach außen** | 🌐 Externer Zugriff | Admin |
+| 🌐 **Nach außen** | 📡 Zugriff ohne Portfreigabe | Admin |
+| | 🌐 Eigener Cloudflare-Tunnel | Admin |
 | | 🤝 Tausch-Netzwerk (verbinden/trennen) | Admin |
 | 🛠 **Wartung** | 💾 Sicherung | Admin |
 | | 🔄 Version & Updates | Admin |
 | | 🐞 Fehlerbericht | Admin |
 | *(ohne Gruppe)* | ℹ️ Quellen & Rechtliches | alle |
+
+**Was im jeweiligen Zustand nichts bewirkt, steht nicht da** (seit 3.9.11):
+„Nur mit zweitem Faktor“ erst, wenn der Zugriff ohne Portfreigabe an ist;
+Modell und Verbindungstest der KI erst mit eingetragener Adresse; der
+Cloudflare-Block erst, wenn Adresse und Token drinstehen; der Schalter für
+Angebotspreise und das Preis-Protokoll nur mit einer Preisquelle. Im
+Katalog-Abzug stehen „Katalogdatei einlesen“ und „Kategorien holen“ nur,
+solange sie etwas nachzuholen haben.
 
 **🎨 Design** bietet drei Aussehen: **Klassisch** (hell, LEGO-Farben),
 **Galaxie** (dunkel, mit Sternenhimmel und leuchtenden Akzenten) und
@@ -616,6 +682,16 @@ red wings".
 **Wo er steht:** unter **Mehr → 📚 Katalog-Abzug** (nur für Admins), seit
 3.4.3 als eigene Karte. Dort steht auch, wie viele Figuren und Sets
 angekommen sind und wann zuletzt geholt wurde.
+
+**Was mitkommt, ganz ohne BrickLink-Zugang** (seit 3.9.x): die Teile jeder
+Figur, bei Sets Name, Thema, Jahr, Teile und Figuren, und deutsche
+Setnamen. Die Karte zählt unter „Mitgeliefert“, was davon angekommen ist.
+**Was nicht mitkommt, sind die Namen der Figuren** – siehe unten. Fehlen
+welche, zeigt die Karte zwei Wege: den eigenen BrickLink-Zugang (holt sie
+nach und nach) oder BrickLinks Katalogdatei (sofort). Sind alle Namen da,
+verschwindet der Abschnitt. **Kategorien holen** steht nur mit eigenem
+Zugang da und nur, wenn ein Set aus BrickLinks `Sets.xml` sein Thema noch
+nicht kennt.
 
 **Erzeugt wird er nicht hier.** Beim Betreiber des Katalogs läuft ein Dienst, der
 BrickLink abklappert und ein lokales Sehmodell die Katalogfotos beschreiben
@@ -951,6 +1027,36 @@ die Scan-Fläche ziehen oder einen **Screenshot mit Strg/Cmd+V** einfügen.
 Die App zeigt eine Kandidatenliste mit Trefferwahrscheinlichkeit, Bild,
 Nummer und – je nach Datenlage – Jahr, Ø-Preisen und Besitz-Hinweisen.
 
+**Erst prüfen** (ab 3.9.0): Gibt es zu einem Treffer eine fast gleiche
+Figur, steht unter ihm die Frage, die beide trennt – etwa „Mit
+Entfernungsmesser? Dann sw1423, sonst sw1422.“ Ein Tipp auf die Frage
+öffnet den Steckbrief der anderen Figur. Dieselbe Frage steht unter den
+Treffern von **Manuell erfassen**.
+
+**Sammelfiguren-Schachteln:** Den Scanner für den Code auf der Schachtel
+gibt es nur in den mobilen Apps (seit 3.9.17 nicht mehr in der
+Browser-Oberfläche). Die Instanz liefert ihnen dafür die Code-Liste und das
+Gelernte. Fotografiert man hier trotzdem eine Schachtel mit bekanntem Code,
+erscheint die Figur als Treffer, ohne dass das Foto zu Brickognize geht.
+
+**Live-Scanner** (nur Nupplo für Windows, ab 0.5.1 links in der
+Seitenleiste unter Scannen): Er schaut auf einen Bereich des Bildschirms,
+etwa ein Video oder den Stream einer Auktion. „🔲 Bereich wählen“ zeigt ein
+Foto des Bildschirms; darauf mit der Maus den Rahmen um das Bild ziehen und
+„✔ Übernehmen“. Mit „▶ Automatik an“ wird erkannt, sobald dort eine neue
+Figur still steht – dieselbe Figur nicht zweimal, und auf einem Drehteller
+höchstens vier Ansichten. „📸 Jetzt erkennen“ nimmt den Bereich sofort.
+Die **Empfindlichkeit** „hoch“ reagiert schon auf kleine Änderungen,
+„niedrig“ erst auf deutliche (gut bei rauschenden Videos). Treffer zeigt
+die App nur, solange der Live-Scanner offen ist – mit dem Katalogbild des
+besten Treffers neben der Aufnahme und einem **Verlauf** darunter, aus dem
+ein Klick jede Erkennung zurückholt. Sieht der Scanner dieselbe Figur mehrmals (etwa auf
+einem Drehteller), sammelt er bis zu sechs **Ansichten**; die angehakten
+kommen beim Hinzufügen als eigene Fotos an den Artikel. „🧍 Nur Figuren“ blendet Sets und
+Teile aus, „🔔 Ton bei Wunsch“ klingelt, wenn ein Treffer auf der
+Wunschliste steht. **Strg+L** erkennt sofort. Nupplos eigenes Fenster ist
+auf den Aufnahmen nicht zu sehen.
+
 **Die Kamera geht in der App auf** (ab 2.88.1): Antippen zeigt sofort das
 Livebild, und **die Mediathek liegt darin daneben** – ein schon
 vorhandenes Foto ist also derselbe Weg, nicht ein anderer. Kann das Gerät
@@ -1217,6 +1323,14 @@ Kaufpreis und die Notizen funktionieren normal.
 
 Beim Tippen des Namens schlägt die App parallel Katalogtreffer vor; passt
 einer, übernimmt ein Tipp Nummer und Bild.
+
+**Einzelteile mit Farbe:** Mit Typ **Einzelteil** findet die Suche Teile
+von Minifiguren auch auf Deutsch und mit Farbe, etwa „weißer Stormtrooper
+Helm mit gelbem Aufdruck“. Die Teile stammen aus den Teilelisten der
+Figuren; Teile in der genannten Farbe stehen oben, und Wörter wie
+„Aufdruck“ oder „bedruckt“ lassen nur bedruckte Teile übrig. Die Farbe
+steht im Namen des Treffers, z. B. „Minifig, Headgear Helmet Stormtrooper
+… (White)“.
 
 **So sieht das Formular aus** (ab 2.88.36): **Typ** und **Zustand** wählst
 du mit Pillen wie im Steckbrief, die **Anzahl** mit Plus und Minus. Unten
@@ -1519,6 +1633,48 @@ automatisch geladen):
   Sammlung** als **gelbe Chips mit ✔** gekennzeichnet und springen zur
   Set-Karte; Sets, die du nicht besitzt, erscheinen als blaue
   BrickLink-Links.
+- Kennt der Katalog einen **deutschen Setnamen**, steht er im Steckbrief
+  über der Nummer („Supersternzerstörer Executor“ statt „Executor Super
+  Star Destroyer“).
+- Unter Name und Nummer eines Sets stehen in kleiner Schrift seine
+  **Eckdaten**: Teile und Figuren, wann es erschienen ist und wann es
+  ausgelaufen ist (**EOL**) oder ausläuft; „≈“ heißt geschätzt. Hat das
+  Thema ein Unterthema, steht es darunter („Star Wars · Ultimate Collector
+  Series“). Teile und Figuren kommen von Rebrickable über den Katalog –
+  Rebrickable zählt Teile etwas anders als die Schachtel (7190: 671 statt
+  663). Erscheinung, EOL und UVP stammen von **Brickmerge** und kommen mit
+  dem Katalog; der Katalogdienst fragt Brickmerge dafür, nicht dein Server
+  beim Öffnen. Junge Sets frischt er wöchentlich auf. Fehlt
+  das EOL, weiß es niemand; das heißt nicht, dass das Set noch im Handel
+  ist. Bei eigenen Sets bleibt der Platz leer.
+- Auf dem Blatt **Preise** steht bei jedem Set die **UVP**. Wer unter
+  **Mehr → Angebotspreise** die Preise von Brickmerge eingeschaltet hat,
+  sieht dort auch **„Bei Brickmerge: ab … ↗“** – das günstigste Angebot,
+  ohne Versand; ein Tipp öffnet die Seite mit allen Händlern. Ist Brickmerge
+  nicht erreichbar oder das Set ausgelaufen, steht nur der Link da.
+- Dieselben Eckdaten, Bilder und Preiszeilen zeigt auch ein **Set aus der
+  Suche** („Manuell erfassen“), bevor du es übernimmst.
+- Mit **Mehr → Angebotspreise → Setbilder von Brickmerge zeigen**
+  (voreingestellt aus) steht unter dem großen Bild eine Reihe mit
+  Brickmerges **weiteren Setbildern** (Schachtel, Ansichten). Ein Tipp auf
+  eines – oder auf das große Bild – öffnet die Großansicht, in der du durch
+  alle Bilder wischst. Das Hauptbild bleibt das aus dem Katalog; nur wo ein
+  Set keins hat, springt Brickmerges ein. Diese Bilder lädt dein Browser
+  direkt bei Brickmerge; dein Server behält keine Kopie. Ausgeschaltet
+  gibt es die Reihe nicht, und es geht keine Anfrage an Brickmerge.
+- Sets aus diesem und dem letzten Jahr prüft Nupplo regelmäßig nach: Führt
+  BrickLink oder der Katalog inzwischen mehr Figuren als beim Erfassen,
+  fragt Nupplo beim nächsten Öffnen wie beim Erfassen, welche davon du
+  hast, und übernimmt nur die angehakten. Gefragt wird je Set einmal.
+- **„👥 Enthaltene Figuren“** geht seit 3.9.3 auch ohne eigenen
+  BrickLink-Zugang: Die Figuren kommen aus derselben Setdatei. Figuren, zu
+  denen es keine eindeutige BrickLink-Nummer gibt, stehen mit Rebrickables
+  Namen und Bild da. Im **Katalog** gibt es Sets seither auch ohne
+  hochgeladene Sets.xml.
+- Seit 3.9.5 steht dort **Exklusiv** an Figuren, die es laut Katalog nur
+  in diesem Set gibt. Eine Neuauflage desselben Sets zählt nicht als
+  zweites Set. Kennt der Katalog eine Figur nicht, steht nichts da – das
+  heißt nicht, dass sie in anderen Sets vorkommt.
 
 ### 5.5 Kaufpreise & Gewinn *(Sammlerprofi)*
 
@@ -1603,6 +1759,18 @@ Widgets, die die geschätzten Anschaffungskosten (gebraucht/neu) summieren.
 - Gehört eine gemerkte Figur zu einem **Set aus deiner Sammlung** und fehlt
   dort noch, steht auf der Karte **🧩 fehlt zu deinem Set: <Setname>**. Ein
   Tipp auf das Set springt direkt dorthin in die Sammlung.
+- **🧩 Teil für Teil** (seit 3.9.0): Hast du von einer gewünschten Figur
+  schon einzelne Teile – etwa Kopf und Torso, nur die Beine fehlen –, hake
+  sie hier ab. Die Karte trägt dann **🧱 Im Bau 2/4**. Die Häkchen gehen mit
+  dem Abgleich auch auf die iOS-App. Die Teile kommen aus der Teiledatei des
+  Katalogs; ohne sie aus BrickLink, wenn ein Schlüssel hinterlegt ist.
+  Abhaken geht auch **direkt in der Suche und im Steckbrief** einer Figur
+  (seit 3.9.14): Mit dem ersten Haken kommt die Figur auf die Wunschliste.
+  Nimmst du alle Haken wieder weg, bleibt sie dort stehen.
+- **🧍 Steckt in diesen Figuren** (seit 3.9.14): Findest du unter
+  „Einzelteil“ ein Teil, zeigt sein Fenster die Figuren, zu denen es gehört.
+  Ein Tipp öffnet den Steckbrief der Figur, dort geht es mit „Teil für Teil“
+  weiter.
 
 ### 6.1 Der Steckbrief
 
@@ -1626,6 +1794,7 @@ Er beantwortet die Frage, die man an dieser Stelle hat:
 | „noch nirgends erfasst" | kennt die App noch gar nicht |
 | 💶 Marktpreis | erst kurz Ø neu und Ø gebraucht, einen Moment später wie im Steckbrief: mit Spanne, Verkaufszahl, Gebietsfahne und – wenn eingeschaltet – den Angebotspreisen |
 | 📦 Steckt in diesen Sets | deine Sets zuerst und anklickbar, danach die übrigen bei BrickLink |
+| 👯 Leicht zu verwechseln | Figuren, die sich nur in **einem** Teil unterscheiden, und welches das ist – etwa sw1423, die sich von sw1422 nur durch den Entfernungsmesser am Helm unterscheidet. Ist nur der Kopf anders und tragen beide einen Helm, steht dort „Nur ohne Helm zu unterscheiden“ (seit 3.9.28; vorher „Ohne Helm nicht zu unterscheiden“) |
 
 Unten stehen **＋ Sammlung**, **☆ Merken** (fällt weg, wenn die Figur schon
 auf der Wunschliste liegt) und **BrickLink ↗**.
@@ -1720,9 +1889,11 @@ seine Markierung, wo er sie gelassen hat.
 aussteht), *Hab ich*, *Gemerkt*. „Fehlt mir" ist die Einkaufsliste für ein
 ganzes Thema.
 
-**Auch Sets** stehen im Katalog, sobald jemand BrickLinks `Sets.xml`
-eingelesen hat (*Mehr → Katalog → Katalogdatei einlesen*). Dafür braucht es
-einen zweiten Schritt: **Kategorien holen** auf derselben Seite.
+**Auch Sets** stehen im Katalog, seit 3.9.3 aus der Setdatei des Katalogs,
+samt Thema. Wer zusätzlich BrickLinks `Sets.xml` eingelesen hat
+(*Mehr → Katalog → Katalogdatei einlesen*), braucht für diese Sets einen
+zweiten Schritt: **Kategorien holen** auf derselben Seite (nur mit eigenem
+Zugang, und nur, solange es etwas zu holen gibt).
 
 Der Grund: Figuren tragen ihr Thema in der Nummer – `sw1213` ist Star Wars.
 Sets nicht: `75192-1` sagt nichts. Deren Thema steht allein in der
@@ -2345,7 +2516,7 @@ deiner eigenen Instanz ausgerechnet:
 - **🧩 Passt zu dir** – Mitglieder mit denselben Lieblingsthemen.
 
 **Profile.** Ein Tipp auf einen Namen – im Entdecken wie an jedem Angebot –
-öffnet das Profil: Über mich, Gegend, Lieblingsthemen, die **Tauschbilanz**
+öffnet das Profil: Über mich, Land, Gegend, Lieblingsthemen, die **Tauschbilanz**
 (Angebote und abgeschlossene Tausche, gezählt vom Hub) und, falls
 freigegeben, die gerundete Sammlungsgröße. Darunter, was das Mitglied
 anbietet und – falls gezeigt – sucht; was davon auf deiner Wunschliste steht
@@ -2403,6 +2574,13 @@ Unter **📤 Ich biete an** im Tab **Tausch** steht, was ins Netzwerk geht:
   Gegenüber steht die Art an der Karte, unter **🔎 Angebote** lässt sich
   danach filtern, und bei reinem Verkauf schlägt die Anfrage einen
   Kauf statt eines Tauschs vor.
+
+- **Land.** Trägst du unter **Mein Profil** dein Land ein, steht es mit
+  Fahne an all deinen Angeboten. Unter **🔎 Angebote** lässt sich nach Land
+  oder Kontinent filtern; zur Auswahl stehen nur Länder, aus denen es gerade
+  Angebote gibt. Wer kein Land angibt, taucht bei gesetztem Filter nicht
+  auf. Ist im Preisgebiet ein Land eingestellt, ist es im Profil schon
+  vorgewählt – zum Hub geht es aber erst, wenn du das Profil speicherst.
 
 Sichtbar wird die Auswahl erst durch **„📤 Im Netzwerk anbieten"**
 (Admin). Bis dahin ändert sich im Netzwerk nichts. Custom-Figuren reisen
@@ -2630,21 +2808,23 @@ Damit klar ist, was wann von allein passiert:
 
 **Preisabruf.** BrickLink-Ø-Preise (neu & gebraucht) werden geholt:
 (1) sofort beim Erfassen eines Artikels, (2) manuell über „Preise
-aktualisieren" in den Details, (3) automatisch vom **Hintergrundjob**:
-Er läuft alle **12 Stunden** und nimmt sich die Artikel vor, deren
-Preise älter als **7 Tage** sind – die ältesten zuerst, mit 2 s Pause
-pro Anfrage, um BrickLink nicht zu belasten.
+aktualisieren" in den Details, (3) beim Öffnen, wenn der gespeicherte Preis
+fällig ist, (4) automatisch vom **Hintergrundjob**: Er läuft **jede
+Stunde** und nimmt sich die Artikel vor, deren Preise älter sind als
+eingestellt („Preise holen alle … Stunden“, vorgegeben 24) – die ältesten
+zuerst, mit 2 s Pause pro Anfrage.
 
-**Wie viele je Durchlauf, richtet sich nach der Sammlung.** Genug, um in
-sieben Tagen einmal durch alles zu kommen, mindestens 40 und höchstens
-400. Bis 2.78.x waren es feste 40 – zwei Läufe am Tag also 80 Preise, und
-wer mehr als 560 Artikel hat, bekam sie nie alle rechtzeitig durch. Bei
-926 Artikeln kam jeder nur alle 11,6 Tage dran, und im Preis-Protokoll
-stand dauerhaft ein Drittel der Sammlung als überfällig.
+Der zentrale Preisdienst hält zuerst die täglichen Figurenpreise aktuell
+und nutzt danach das verbleibende Abrufbudget für Sets. Deshalb kann ein
+Setpreis älter sein; der letzte bekannte Wert bleibt bis zur Erneuerung
+erhalten und ist in der Sammlung mit seinem Preisstand gekennzeichnet.
 
-Ab etwa **5.600 Artikeln** greift der Deckel, dann dauert eine Runde
-wieder länger als sieben Tage – lieber ein ehrlicher Rückstand als ein
-gesperrter BrickLink-Zugang.
+**Wie viele je Durchlauf, richtet sich nach der Sammlung.** Genug, um im
+eingestellten Abstand einmal durch alles zu kommen, höchstens 72 je Stunde
+für alle Listen zusammen. Das sind gut **1.700 Artikel am Tag**; wer mehr hat,
+sieht beim Rest „Preis bei BrickLink ansehen“ – lieber das als ein
+gesperrter BrickLink-Zugang. Bis 3.9.16 lief der Job alle 12 Stunden für
+Preise älter als sieben Tage.
 
 **Namen des Katalogabzugs.** Der veröffentlichte Abzug enthält Nummer und
 Bildbeschreibung, aber **keine Namen** – die holt jede Instanz über ihren
@@ -2732,7 +2912,9 @@ selbst.
 ### 13.1 Preisgebiet und Währung
 
 BrickLink liefert standardmäßig den **weltweiten** Durchschnitt in Euro.
-Unter **Mehr → 🌍 Preisgebiet** (Admin) lassen sich beide Seiten einstellen:
+Unter **Mehr → 💶 Preise** (Admin) lassen sich beide Seiten einstellen. Mit
+dem Preisdienst rechnet Nupplo selbst um, mit den EZB-Kursen aus der
+Preisliste; mit eigenem Zugang so, wie unten beschrieben:
 
 **Gebiet** – 21 Länder (Deutschland, Österreich, Schweiz, Großbritannien,
 Irland, USA, Kanada, Australien, Neuseeland, Niederlande, Belgien,
@@ -2804,10 +2986,10 @@ Version 1.13.0 behoben.)
 
 **Mehr → 📈 Preis-Protokoll** *(Sammlerprofi)* listet die jüngsten
 Aufzeichnungen mit Zeitpunkt, Artikel, Preisen und Quelle (`auto` oder
-`manuell`). Darüber steht, **bei wie vielen Artikeln der Preisabruf älter
-als sieben Tage ist** – so siehst du auf einen Blick, wie aktuell die
-Bewertung deiner Sammlung ist. Sind alle Preise frisch, steht dort
-stattdessen eine Bestätigung.
+`manuell`), auch ältere aus dem Preisdienst. Darüber steht, **wie viele
+Artikel gerade keinen aktuellen Preis haben** – so siehst du auf einen
+Blick, wie vollständig die Bewertung deiner Sammlung ist. Sind alle Preise
+aktuell, steht dort stattdessen eine Bestätigung.
 
 **Ein Pfeil sagt, wohin der Preis ging.** Neben jedem Betrag steht ein
 grünes **↑**, wenn er seit dem vorherigen Punkt desselben Artikels
@@ -3153,7 +3335,7 @@ zeigt Mehr → 🔄 Version & Updates; danach reicht normales Neuladen.
 **Preise fehlen bei einzelnen Artikeln.** Manuelle Nummern haben keine
 BrickLink-Entsprechung. Frisch importierte Artikel werden in 40er-Häppchen
 versorgt – Geduld oder im Detail-Popup das **↻** am Preisblock „Marktpreise"
-drücken. Grundsätzlich keine Preise? → Mehr → API-Schlüssel → „Verbindung testen".
+drücken. Grundsätzlich keine Preise? → Mehr → Preise → Quelle prüfen, dann „Verbindung testen".
 
 **Bedruckte Teile.** Die beiden Kataloge zählen Bedruckungen
 unterschiedlich: Der Gungan-Schild heißt bei Rebrickable `2586pr0028` und
@@ -3175,7 +3357,10 @@ verschwindet er wieder. Profis sehen ihn immer.
 ändert man über das Profil-Popup (Name oben rechts antippen); vergessene
 Passwörter setzt der Admin in der Benutzerverwaltung zurück. Ist der Admin selbst
 ausgesperrt: letzte Sicherung einspielen oder `data/brickfolio.db` aus
-einem Backup zurückkopieren.
+einem Backup zurückkopieren – bei gestopptem Container, und
+`brickfolio.db-wal` und `brickfolio.db-shm` daneben vorher löschen. Die
+gehören zum alten Stand; zusammen mit einer zurückkopierten Datei
+beschädigen sie die Datenbank.
 
 **Kamera öffnet nicht.** PWA einmal schließen und neu öffnen;
 Kamera-Berechtigung des Browsers prüfen. Auf iOS funktioniert der

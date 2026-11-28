@@ -267,6 +267,28 @@ def test_jede_gespeicherte_einstellung_ist_eingeordnet():
                                 # die zugehörige Adresse steht dagegen in
                                 # GEHEIME_SETTINGS
         "ollama_bild_model",    # dasselbe für das Modell, das Bilder ansieht
+        "cmf_teilen",           # „Gelernte Schachtel-Codes teilen“, 0/1
+        # Tageslimit je Gerät (Windows, 25.11.2026): Zahlen und Tage, kein
+        # Schlüssel
+        "bl_geraet_limit", "bl_verbrauch_tag", "bl_verbrauch_n",
+        "bl_verbrauch_zuletzt", "bl_erschoepft_tag",
+        "bl_andere_tag", "bl_andere_n", "bl_andere_geraete", "bl_andere_erschoepft",
+        "bl_geraet_name",
+        "desktop_willkommen",   # Assistent am eigenen Rechner gezeigt, 0/1
+        "abgleich_an", "abgleich_seit", "abgleich_geschickt",  # Stände
+        "abgleich_epoch", "abgleich_zuletzt", "abgleich_fehler",
+        "abgleich_adresse",     # Adresse der SE zu Hause, wie ollama_model
+        "abgleich_benutzer",    # Benutzername dort, kein Zugang
+        "abgleich_weg",         # „heimnetz“ oder „connect“, zuletzt benutzt
+        "abgleich_name",        # Anzeigename der SE dort
+        "abgleich_unterwegs_grund",  # warum nicht für unterwegs gekoppelt
+        "ordner_an", "ordner_geschickt", "ordner_gelesen",  # Stände des
+        "ordner_nummer", "ordner_zuletzt", "ordner_fehler",  # Cloud-Ordners
+        "ordner_id",            # Kennung des Ordners, steht dort offen
+        "ordner_geraet",        # zufällige Kennung dieses Geräts im Ordner
+        "bildschirm_bereich",   # Lage des Live-Scanner-Bereichs, vier Zahlen
+        "bildschirm_stufe",     # Empfindlichkeit, „hoch“/„mittel“/„niedrig“
+        "preisabruf_stunden",   # alle wie viele Stunden, z. B. „24“
         "katalog_themen",       # Nummernpräfixe wie „sw,cty“ – Wissen
                                 # über BrickLinks Nummernschema, kein Zugang
         "katalog_log_stand",    # bis wann der Change Log abgeglichen ist,
@@ -285,10 +307,19 @@ def test_jede_gespeicherte_einstellung_ist_eingeordnet():
         "katalog_etag",         # welchen Stand der veröffentlichten Datei
                                 # diese Instanz schon hat – spart 3,3 MB,
                                 # wenn sich nichts geändert hat
+        "setnamen_etag",        # dasselbe für die Setnamendatei
+        "setnamen_quelle",      # andere Adresse der Setnamendatei (Test)
+        "setdaten_etag",        # dasselbe für die Setdatei (Teile, Thema)
         "katalog_geholt_at",    # wann zuletzt geholt wurde
         "katalog_geprueft_at",  # wann zuletzt nachgesehen wurde
         "katalog_aus",          # „1" heißt: Diese Instanz holt den Abzug
                                 # nicht. Eine Entscheidung, kein Zugang
+        "figurteile_etag",      # Stand der Teiledatei (3.9.0), wie oben
+        "figurteile_geholt_at",  # wann sie zuletzt geholt wurde
+        "figurteile_geprueft_at",  # wann zuletzt nachgesehen wurde
+        "figurteile_farben",    # BrickLink-Farbnummer → Name aus der
+        "figurteile_farben_de", # dasselbe auf Deutsch (10.10.2026)
+                                # Datei – öffentliche Katalogdaten
         "extern_zuletzt",       # wann die App zuletzt von außen genutzt
         "extern_mit_access",    # wurde, mit bzw. ohne Cloudflare Access –
         "extern_ohne_access",   # Zeitstempel, kein Zugang, keine Adresse
@@ -316,6 +347,12 @@ def test_jede_gespeicherte_einstellung_ist_eingeordnet():
         "hub_installation_gesperrt",  # Grund/Ende, wenn schon der Beitritt
                                 # abgelehnt wurde, weil die Installation
                                 # gesperrt ist – vom Hub, nur zur Anzeige
+        "preisquelle",          # „hub" oder leer – eine Entscheidung
+        "hub_preise_ruhe_bis",  # Notbremse des Preisdiensts: bis wann Ruhe (3.9.32)
+        "hub_uhr_versatz",      # Uhrversatz zum Hub für x-nupplo-zeit (3.9.32)
+        "hub_preise_stand",     # ETag, Zeitpunkt und Anzahl des letzten
+                                # Hub-Preisabzugs je Gebiet
+        "hub_preise_kurse",     # EZB-Kurse aus dem Abzug, öffentlich
         "katalog_quelle",       # Adresse der veröffentlichten Datei. Kein
                                 # Zugang: Sie ist öffentlich, und genau
                                 # deshalb steht kein BrickLink-Inhalt darin

@@ -15,7 +15,7 @@ APP_JS = Path(__file__).resolve().parents[1] / "frontend" / "app.js"
 
 def _open_gallery() -> str:
     js = APP_JS.read_text()
-    m = re.search(r"function openGallery\(startUrl, gid, gtype\) \{.*?\n\}\n",
+    m = re.search(r"function openGallery\(startUrl, gid, gtype[^)]*\) \{.*?\n\}\n",
                   js, re.S)
     assert m, "openGallery nicht gefunden"
     return m.group(0)

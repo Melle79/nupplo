@@ -4,7 +4,13 @@ Katalog-Abfragen (Suche/Scan/Popup) dürfen denselben Preis kurz gecacht
 wiederverwenden; gespeicherte Preise (Sammlung/Wunschliste) holen ohne Flag
 weiterhin frisch.
 """
+import pytest
 import integrations
+
+# Prüft den Weg über BrickLink, siehe `mit_eigenem_schluessel` in conftest.
+pytestmark = pytest.mark.usefixtures("mit_eigenem_schluessel")
+
+
 
 
 def _mock_request(monkeypatch, calls):

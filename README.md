@@ -329,7 +329,8 @@ docker compose up -d --build
 | `DB_PATH` | nein | Pfad zur SQLite-Datei (Default im Container: `/data/brickfolio.db`) |
 | `BL_CONSUMER_KEY` / `BL_CONSUMER_SECRET` / `BL_TOKEN` / `BL_TOKEN_SECRET` | nein | BrickLink-Store-API für Preise & Set-Inhalte ([Key beantragen](https://www.bricklink.com/v2/api/register_consumer.page)) |
 | `BACKUP_KEEP` | nein | Automatische tägliche Sicherungen aufbewahren (Standard 14, 0 = aus) |
-| `REBRICKABLE_KEY` | nein | Rebrickable-API für die Namenssuche ([Key erstellen](https://rebrickable.com/api/)) |
+| `REBRICKABLE_KEY` | nein | Rebrickable-API für die Suche nach Sets, Teilen und neuen Figuren ([Key erstellen](https://rebrickable.com/api/)) |
+| `PREISQUELLE` | nein | `hub` = Preise vom Nupplo-Preisdienst ohne eigenen Schlüssel, `bricklink` = eigener Zugang (Vorgabe). Startwert, die Wahl unter Mehr → Preise hat Vorrang |
 | `GITHUB_REPO` | nein | Ziel-Repository für Issues aus dem Fehlerbericht (Default `Melle79/nupplo`) |
 
 Alle API-Keys lassen sich alternativ **in der App** hinterlegen
@@ -454,7 +455,10 @@ Countdown läuft, kann der Admin abbrechen.
   als fünf Minuten, wird das Update gar nicht erst angeboten.
 - Protokoll jedes Laufs: `data/update-watch.log`.
 - Sicherung: In-App unter Mehr → Sicherung (JSON mit allen Daten inkl.
-  Benutzern und Preisverläufen) **oder** einfach `data/brickfolio.db` kopieren.
+  Benutzern und Preisverläufen) **oder** bei gestopptem Container
+  `data/brickfolio.db` kopieren – seit 3.8.2 zusammen mit
+  `brickfolio.db-wal`, falls vorhanden (die Datenbank läuft im WAL-Modus;
+  die letzten Änderungen können noch dort stehen).
 
 ## Technik
 

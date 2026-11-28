@@ -274,7 +274,8 @@ docker compose up -d --build
 | `DB_PATH` | no | Path to the SQLite file (container default: `/data/brickfolio.db`) |
 | `BL_CONSUMER_KEY` / `BL_CONSUMER_SECRET` / `BL_TOKEN` / `BL_TOKEN_SECRET` | no | BrickLink Store API for prices & set inventories ([request a key](https://www.bricklink.com/v2/api/register_consumer.page)) |
 | `BACKUP_KEEP` | no | Keep this many automatic daily backups (default 14, 0 = off) |
-| `REBRICKABLE_KEY` | no | Rebrickable API for name search ([create a key](https://rebrickable.com/api/)) |
+| `REBRICKABLE_KEY` | no | Rebrickable API for search for sets, parts and new figures ([create a key](https://rebrickable.com/api/)) |
+| `PREISQUELLE` | no | `hub` = prices from the Nupplo price service without your own key, `bricklink` = own access (default). Starting value; the choice under More → Prices takes precedence |
 | `GITHUB_REPO` | no | Target repository for issues from the error report (default `Melle79/nupplo`) |
 | `BRICKFOLIO_NAME` | no | Display name in logo/title (empty by default); also settable in-app |
 
@@ -389,7 +390,10 @@ browsers reload themselves. While the countdown runs, the admin can cancel.
   update is not offered at all.
 - Log of every run: `data/update-watch.log`.
 - Backup: in-app under More → Backup (JSON with all data incl. users and
-  price history) **or** simply copy `data/brickfolio.db`.
+  price history) **or**, with the container stopped, copy
+  `data/brickfolio.db` – since 3.8.2 together with `brickfolio.db-wal` if
+  present (the database runs in WAL mode; the latest changes may still be
+  there).
 
 ## Tech
 

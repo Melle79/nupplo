@@ -44,6 +44,7 @@ def instanz(tmp_path, monkeypatch):
     v = connect.verbinder
     v.ed25519, v.x25519 = connect.schluessel()
     v.app, v.loop, v.kanaele = main.app, None, {}
+    v.puffer, v.getrennt_seit = [], None
     yield v
 
 
@@ -528,3 +529,112 @@ def test_stummer_kanal_geht_nach_der_frist_zu(instanz, monkeypatch):
         assert 11 not in instanz.kanaele
         assert connect._rahmen(connect.SCHLIESSEN, 11) in leitung.raus
     lauf(ablauf())
+
+
+# ------------------------------------------------------------- Abriss
+
+class FlatterLeitung(Leitung):
+    """Eine Leitung, die nach `bis` Rahmen ohne Abschied abreißt."""
+
+    def __init__(self, rein=(), reisst=True):
+        super().__init__()
+        self.rein, self.reisst = list(rein), reisst
+        self.close_code, self.close_reason = None, ""
+        self.weiter = asyncio.Event()
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        if self.rein:
+            return self.rein.pop(0)
+        if self.reisst:
+            raise ConnectionError("no close frame received or sent")
+        await self.weiter.wait()
+        raise StopAsyncIteration
+
+    async def close(self, *a):
+        pass
+
+
+class Vermittler:
+    """Gibt der Reihe nach die Leitungen heraus, wie `websockets.connect`."""
+
+    def __init__(self, leitungen):
+        self.leitungen = list(leitungen)
+
+    def __call__(self, *a, **kw):
+        leitung = self.leitungen.pop(0)
+
+        class Rahmen:
+            async def __aenter__(self_):
+                return leitung
+
+            async def __aexit__(self_, *a):
+                return False
+        return Rahmen()
+
+
+def test_kurzer_abriss_trennt_die_geraete_nicht(instanz, monkeypatch):
+    """Cloudflare kappt die Leitung ab und zu ohne Abschied – neunmal in
+    48 Stunden auf einer Instanz (23.11.2026). Jedes Mal flogen alle Geräte
+    raus. Jetzt bleiben die Kanäle offen, und was in der Lücke an ein Gerät
+    gehen sollte, kommt nach dem Wiederverbinden in derselben Reihenfolge an."""
+    import websockets
+    erste, zweite = FlatterLeitung(), FlatterLeitung(reisst=False)
+    monkeypatch.setattr(websockets, "connect", Vermittler([erste, zweite]))
+    monkeypatch.setattr(connect.random, "random", lambda: 0)
+
+    async def ablauf():
+        instanz.ws = None
+        instanz.kanaele[7] = kanal = connect.Kanal(instanz, 7, "")
+        aufgabe = asyncio.create_task(instanz._laufen())
+        for _ in range(100):
+            if instanz.getrennt_seit is not None:
+                break
+            await asyncio.sleep(0.01)
+        assert instanz.ws is None and 7 in instanz.kanaele
+        await instanz.senden(b"\x02eins")        # in der Lücke
+        await instanz.senden(b"\x02zwei")
+        for _ in range(300):
+            if instanz.ws is zweite:
+                break
+            await asyncio.sleep(0.01)
+        assert instanz.ws is zweite, "neu verbunden"
+        assert instanz.kanaele.get(7) is kanal, "derselbe Kanal lebt weiter"
+        assert [r for r in zweite.raus if r != "ping"][:2] == [b"\x02eins", b"\x02zwei"]
+        assert instanz.puffer == []
+        aufgabe.cancel()
+        await asyncio.gather(aufgabe, return_exceptions=True)
+    lauf(ablauf())
+
+
+def test_nach_der_gnadenfrist_gehen_die_kanaele_zu(instanz, monkeypatch):
+    import websockets
+    zweite = FlatterLeitung(reisst=False)
+    monkeypatch.setattr(websockets, "connect", Vermittler([zweite]))
+
+    async def ablauf():
+        instanz.ws, instanz.puffer = None, [b"\x02alt"]
+        instanz.kanaele[7] = connect.Kanal(instanz, 7, "")
+        instanz.getrennt_seit = time.monotonic() - connect.GNADE - 1
+        aufgabe = asyncio.create_task(instanz._laufen())
+        for _ in range(100):
+            if instanz.ws is zweite:
+                break
+            await asyncio.sleep(0.01)
+        assert instanz.kanaele == {} and instanz.puffer == []
+        assert b"\x02alt" not in zweite.raus
+        aufgabe.cancel()
+        await asyncio.gather(aufgabe, return_exceptions=True)
+    lauf(ablauf())
+
+
+def test_unbekannter_kanal_wird_zugemacht(instanz):
+    """Nach einem Neustart der Instanz kennt sie die alten Kanäle nicht mehr.
+    Statt dass das Gerät ewig auf Antwort wartet, geht sein Kanal zu – und es
+    klopft neu an."""
+    leitung = FlatterLeitung(rein=[connect._rahmen(connect.DATEN, 42, b"x")], reisst=False)
+    leitung.weiter.set()
+    lauf(instanz._lesen(leitung))
+    assert leitung.raus == [connect._rahmen(connect.SCHLIESSEN, 42)]

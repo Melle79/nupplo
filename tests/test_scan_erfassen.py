@@ -29,7 +29,7 @@ def css() -> str:
 
 
 def _scan() -> str:
-    m = re.search(r"function renderScanResults\(items\) \{.*?\n\}\n", js(), re.S)
+    m = re.search(r"function renderScanResults\(items(?:, nummern = null)?\) \{.*?\n\}\n", js(), re.S)
     assert m
     return m.group(0)
 

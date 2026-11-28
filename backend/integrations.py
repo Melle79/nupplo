@@ -48,6 +48,13 @@ GEHEIME_SETTINGS = (
     "hub_token",              # Zugang dieser Instanz zum Tausch-Netzwerk
     "hub_privkey",            # entschlüsselt die Nachrichten anderer
     "hub_instance_secret",
+    "hub_preis_token",        # anonymer Preis-Zugang beim Hub (3.9.0)
+    "abgleich_token",         # Anmeldung von Nupplo für Windows bei der SE
+                              # zu Hause (Abgleich, 3.9.18)
+    "ordner_schluessel",      # entschlüsselt die Pakete im Cloud-Ordner
+    "google_refresh",         # Zugang zu Google Drive (Abgleich, 25.11.2026)
+    "ordner_pfad",            # kein Zugang, aber der Pfad trägt oft den
+                              # Windows-Benutzernamen (C:\Users\…)
     "betreiber_kontakt",      # **kein Zugang, aber personenbezogen.** Die
                               # E-Mail des Betreibers steht absichtlich
                               # sichtbar in *seiner* Instanz – das heißt
@@ -83,6 +90,12 @@ BL_LABELS = {"bl_consumer_key": "Consumer Key",
 
 def bricklink_enabled() -> bool:
     return all(setting(k) for k in BL_KEYS)
+
+
+def preise_moeglich() -> bool:
+    """Gibt es überhaupt eine Preisquelle – eigener Schlüssel oder Hub?"""
+    import hubpreise
+    return hubpreise.an() or bricklink_enabled()
 
 
 def bricklink_missing() -> list:
@@ -182,7 +195,14 @@ RESOLVE_HOSTS = {"cdn.rebrickable.com", "img.bricklink.com"}
 # offener Weg dorthin wäre ein Werkzeug, um von innen beliebige Adressen
 # anzufragen. `storage.googleapis.com` steht drin, weil Brickognize seine
 # Vorschaubilder dort ablegt – ohne den Host hätte alles Gescannte kein Bild.
+# brickmerge.de stand von 3.9.6 bis 3.9.12 hier. Seit 3.9.13 lädt der
+# Browser Brickmerges Setbilder selbst, und nur auf Wunsch – Sven: „Die
+# Bilder bitte nicht mit ziehen, diese sollen von dort aus geöffnet werden.“
+# Der Server soll davon keine Kopie haben, also auch keinen Weg dorthin.
 BILD_HOSTS = RESOLVE_HOSTS | {"storage.googleapis.com", "m.rebrickable.com"}
+
+
+_bild_sitzung = requests.Session()
 
 
 def fetch_catalog_image(url: str, hosts: set | None = None) -> bytes:
@@ -192,7 +212,12 @@ def fetch_catalog_image(url: str, hosts: set | None = None) -> bytes:
     erlaubt = RESOLVE_HOSTS if hosts is None else hosts
     if p.scheme not in ("http", "https") or p.hostname not in erlaubt:
         raise ValueError("Bild-URL nicht erlaubt")
-    resp = requests.get(url, timeout=20, headers={"User-Agent": USER_AGENT})
+    # Eigene Sitzung: Eine Seite voller neuer Bilder geht an dieselben
+    # zwei, drei Hosts – bis 3.8.1 mit einem neuen TLS-Handschlag je Bild.
+    # Verbindungsaufbau höchstens 5 s: Ein Host, der gar nicht antwortet,
+    # soll nicht 20 s lang einen Abrufplatz blockieren.
+    resp = _bild_sitzung.get(url, timeout=(5, 15),
+                             headers={"User-Agent": USER_AGENT})
     resp.raise_for_status()
     if len(resp.content) > 10 * 1024 * 1024:
         raise ValueError("Bild zu groß")
@@ -681,6 +706,122 @@ def _fallback_chain(wanted: str) -> list[str]:
     return chain
 
 
+# ------------------------------------------- Tageslimit je Gerät (Windows)
+#
+# Nur in Nupplo für Windows (25.11.2026, Konzept vom 06.11., Sven: „Alles
+# ja!“): Trägt jemand denselben Schlüssel auf zwei Geräten ein, teilen sich
+# beide BrickLinks 5.000 am Tag, und keins sieht, was das andere verbraucht.
+# Deshalb zählt jedes Gerät seine Preisabrufe und hört bei seinem Limit auf
+# (Vorgabe 2.000). Gezählt wird jeder Abruf, auch ein fehlgeschlagener.
+# Meldet BrickLink selbst das Limit, ist bis morgen Schluss. Die SE auf
+# einem Server zählt nicht: Sie ist mit ihrem Schlüssel allein.
+
+GERAET_LIMIT_STD = 2000
+GERAET_LIMIT_MIN = 100
+GERAET_LIMIT_MAX = 5000
+# Geteilt über Nupplo SE (25.11.2026: „das Teilen über alle Geräte“):
+# Alle Geräte und die SE selbst, die denselben Schlüssel nutzen, melden ihren
+# Tagesverbrauch an die SE. Zusammen hören sie hier auf – mit Abstand zu
+# BrickLinks 5.000, weil die Meldungen nur bei jedem Abgleich kommen.
+GEMEINSAM_LIMIT = 4500
+
+
+def schluessel_abdruck() -> str:
+    """Woran die SE erkennt, dass zwei Geräte denselben BrickLink-Zugang
+    nutzen – ohne den Schlüssel zu kennen. Dieselbe Formel gilt in den Apps:
+    SHA-256 über „nupplo-bl-v1\n<Consumer Key>\n<Token>“, die ersten 20
+    Hex-Zeichen. Leer ohne Schlüssel."""
+    ck, tok = setting("bl_consumer_key"), setting("bl_token")
+    if not ck or not tok:
+        return ""
+    import hashlib
+    return hashlib.sha256(f"nupplo-bl-v1\n{ck}\n{tok}".encode()).hexdigest()[:20]
+
+
+class KontingentErschoepft(RuntimeError):
+    """Das Tageslimit dieses Geräts oder BrickLinks ist erreicht."""
+
+
+def _zaehlt() -> bool:
+    import desktop
+    return desktop.an()
+
+
+def _heute() -> str:
+    return time.strftime("%Y-%m-%d")
+
+
+def geraet_limit() -> int:
+    try:
+        n = int(core.get_setting("bl_geraet_limit") or GERAET_LIMIT_STD)
+    except ValueError:
+        n = GERAET_LIMIT_STD
+    return max(GERAET_LIMIT_MIN, min(GERAET_LIMIT_MAX, n))
+
+
+def verbrauch_heute() -> int:
+    if core.get_setting("bl_verbrauch_tag") != _heute():
+        return 0
+    try:
+        return int(core.get_setting("bl_verbrauch_n") or 0)
+    except ValueError:
+        return 0
+
+
+def andere_heute() -> dict:
+    """Was die anderen Geräte mit demselben Schlüssel heute verbraucht haben,
+    wie es die SE beim letzten Abgleich gemeldet hat."""
+    if core.get_setting("bl_andere_tag") != _heute():
+        return {"n": 0, "erschoepft": False, "geraete": 0}
+    try:
+        n = int(core.get_setting("bl_andere_n") or 0)
+        geraete = int(core.get_setting("bl_andere_geraete") or 0)
+    except ValueError:
+        n, geraete = 0, 0
+    return {"n": n, "erschoepft": core.get_setting("bl_andere_erschoepft") == "1",
+            "geraete": geraete}
+
+
+def kontingent_stand() -> dict:
+    andere = andere_heute()
+    erschoepft = core.get_setting("bl_erschoepft_tag") == _heute() or andere["erschoepft"]
+    heute = verbrauch_heute()
+    frei = max(0, min(geraet_limit() - heute, GEMEINSAM_LIMIT - heute - andere["n"]))
+    return {"limit": geraet_limit(), "heute": heute,
+            "bricklink_limit": erschoepft,
+            "frei": 0 if erschoepft else frei,
+            "zuletzt": int(core.get_setting("bl_verbrauch_zuletzt") or 0),
+            "geteilt": {"andere": andere["n"], "geraete": andere["geraete"],
+                        "gemeinsam_limit": GEMEINSAM_LIMIT}}
+
+
+def _kontingent_vorher() -> None:
+    if not _zaehlt():
+        return
+    if core.get_setting("bl_erschoepft_tag") == _heute():
+        raise KontingentErschoepft("BrickLink meldet das Tageslimit – morgen geht es weiter")
+    if verbrauch_heute() >= geraet_limit():
+        raise KontingentErschoepft("Tageslimit dieses Geräts erreicht – morgen geht es weiter")
+    andere = andere_heute()
+    if andere["erschoepft"]:
+        raise KontingentErschoepft("BrickLink meldet das Tageslimit – morgen geht es weiter")
+    if verbrauch_heute() + andere["n"] >= GEMEINSAM_LIMIT:
+        raise KontingentErschoepft("Deine Geräte haben heute zusammen genug abgerufen – "
+                                   "morgen geht es weiter")
+
+
+def _kontingent_zaehlen() -> None:
+    # Gezählt wird überall, auch auf der SE am Server: Sie meldet ihren Teil
+    # den Geräten mit demselben Schlüssel. Begrenzt wird nur am Gerät.
+    core.set_setting("bl_verbrauch_tag", _heute())
+    core.set_setting("bl_verbrauch_n", str(verbrauch_heute() + 1))
+    core.set_setting("bl_verbrauch_zuletzt", str(int(time.time())))
+
+
+def _kontingent_ende() -> None:
+    core.set_setting("bl_erschoepft_tag", _heute())
+
+
 def _price_request(bl_type: str, item_no: str, condition: str, scope: str,
                    auth, waehrung: str = "EUR",
                    guide_type: str = "sold") -> dict:
@@ -692,12 +833,22 @@ def _price_request(bl_type: str, item_no: str, condition: str, scope: str,
             params["country_code"] = scope
         else:
             params["region"] = scope
-    resp = requests.get(
-        f"https://api.bricklink.com/api/store/v1/items/{bl_type}/{item_no}/price",
-        params=params, auth=auth, timeout=20)
+    _kontingent_vorher()
+    try:
+        resp = requests.get(
+            f"https://api.bricklink.com/api/store/v1/items/{bl_type}/{item_no}/price",
+            params=params, auth=auth, timeout=20)
+    finally:
+        _kontingent_zaehlen()
+    if resp.status_code == 429:
+        _kontingent_ende()
+        raise KontingentErschoepft("BrickLink meldet das Tageslimit – morgen geht es weiter")
     resp.raise_for_status()
     payload = resp.json()
     meta = payload.get("meta", {})
+    if meta.get("code") == 429:
+        _kontingent_ende()
+        raise KontingentErschoepft("BrickLink meldet das Tageslimit – morgen geht es weiter")
     if meta.get("code") != 200:
         raise RuntimeError(meta.get("message", "BrickLink-Fehler"))
     return payload.get("data", {})
@@ -753,6 +904,13 @@ def price_guide(item_type: str, item_no: str, condition: str = "U",
     waehrung = currency() if waehrung is None else waehrung
     if waehrung not in CURRENCIES:
         waehrung = "EUR"
+
+    import hubpreise
+    if hubpreise.an():
+        # Preisquelle Hub: nur im lokalen Tagesabzug nachschlagen, kein
+        # Abruf nach draußen – siehe `hubpreise.py`.
+        return hubpreise.nachschlagen(item_type, item_no, condition, wanted,
+                                      waehrung, guide_type)
 
     cache_key = (bl_type, item_no, condition, wanted, waehrung, guide_type)
     if use_cache:

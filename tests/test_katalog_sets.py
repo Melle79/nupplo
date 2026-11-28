@@ -21,7 +21,7 @@ from fastapi.testclient import TestClient
 def ctx(tmp_path, monkeypatch):
     monkeypatch.setattr(core, "DB_PATH", str(tmp_path / "ks.db"))
     core.init_db()
-    main._kategorien_cache.clear()
+    main._kategorien_vergessen()
     now = int(time.time())
     with core.db() as conn:
         uid = conn.execute(
@@ -79,7 +79,7 @@ def test_ohne_kategoriebaum_bleibt_das_thema_leer(ctx):
     """Lieber gar kein Thema als ein erfundenes."""
     with core.db() as conn:
         conn.execute("DELETE FROM katalog_kategorien")
-    main._kategorien_cache.clear()
+    main._kategorien_vergessen()
     assert main._thema_von("75192-1", "65") == ""
 
 

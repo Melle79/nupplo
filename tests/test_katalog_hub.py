@@ -66,7 +66,7 @@ def test_der_abzug_kommt_als_datei_an(client, monkeypatch):
     assert erg["neu"] == 1
     with core.db() as conn:
         r = conn.execute("SELECT * FROM katalog_index").fetchone()
-    # Seit 3.8.2 wird gleich nach dem Abruf eingedeutscht, nicht nur
+    # Seit 3.9.15 wird gleich nach dem Abruf eingedeutscht, nicht nur
     # einmal beim Start – der englische Text bleibt vorn stehen.
     assert r["merkmale"].startswith("cape yellow green dragon")
     assert r["art"] == "knight"
@@ -523,3 +523,46 @@ def test_auch_kinder_duerfen_nachsehen_lassen(client, monkeypatch):
     k = TestClient(main.app)
     k.headers["Authorization"] = "Bearer " + core.create_token(kid, "kind", False)
     assert k.post("/api/katalog/auffrischen").status_code == 200
+
+
+def test_ein_neuer_abzug_laesst_unveraenderte_zeilen_in_ruhe(client, monkeypatch):
+    """Vorfall (Performance-Durchsicht 09.10.2026): Jeder Abzug gab allen
+    19.000 Zeilen eine neue Zeit, auch unveränderten. Der Abgleich liefert
+    nach Zeit – also bekam jedes gekoppelte Gerät nach jedem nächtlichen
+    Abzug wieder den ganzen Katalog statt der paar neuen Zeilen."""
+    alt = {"item_no": "cas001", "art": "knight", "farben": "red",
+           "merkmale": "cape"}
+    _datei(monkeypatch, [alt, {"item_no": "cas002", "art": "knight",
+                               "farben": "blue", "merkmale": "helm"}])
+    main._katalog_ziehen()
+    with core.db() as conn:
+        conn.execute("UPDATE katalog_index SET updated_at = 1000")
+    _datei(monkeypatch, [alt, {"item_no": "cas002", "art": "knight",
+                               "farben": "blue", "merkmale": "helm, schwert"}],
+           etag='"neu"')
+    main._katalog_ziehen()
+    with core.db() as conn:
+        zeiten = {r["item_no"]: r["updated_at"] for r in conn.execute(
+            "SELECT item_no, updated_at FROM katalog_index")}
+    assert zeiten["cas001"] == 1000          # unverändert: bleibt
+    assert zeiten["cas002"] > 1000           # geändert: neue Zeit
+
+
+def test_ein_gefundener_name_erreicht_gekoppelte_geraete(client, monkeypatch):
+    """Der Namenslauf setzte keine neue Zeit. Solange der nächtliche Abzug
+    jede Zeile neu stempelte, fiel das nicht auf; seit er Unverändertes in
+    Ruhe lässt (3.8.2), käme ein dort gefundener Name nie beim Abgleich an
+    (Hinweis aus der Abstimmung mit dem externen Zugriff, 09.10.2026). Der
+    Strich bei 404 dagegen soll nicht als Name hinausgehen."""
+    _datei(monkeypatch, [{"item_no": "cas001", "merkmale": "torso red"},
+                         {"item_no": "weg001", "merkmale": "torso blue"}])
+    main._katalog_ziehen()
+    with core.db() as conn:
+        conn.execute("UPDATE katalog_index SET updated_at = 1000")
+    _bricklink(monkeypatch, {"cas001": "Dragon Master - Yellow Plumes"})
+    main._katalog_namen()
+    with core.db() as conn:
+        zeiten = {r["item_no"]: r["updated_at"] for r in conn.execute(
+            "SELECT item_no, updated_at FROM katalog_index")}
+    assert zeiten["cas001"] > 1000
+    assert zeiten["weg001"] == 1000

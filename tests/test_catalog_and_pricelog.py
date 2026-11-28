@@ -97,18 +97,20 @@ def _add(conn, item_id, price_updated_at):
 
 
 def test_pricelog_counts_only_stale_real_items(client):
+    """Seit 3.9.17: Gezählt wird, was gerade keinen aktuellen Preis hat –
+    auch, was nie abgerufen wurde."""
     now = int(time.time())
-    old = now - 10 * 86400          # älter als 7 Tage
-    fresh = now - 86400
+    old = now - 10 * 86400
+    fresh = now - 3600
     with core.db() as conn:
         _add(conn, "sw0001", old)
         _add(conn, "sw0002", old)
         _add(conn, "sw0100", fresh)      # frisch
-        _add(conn, "sw0200", None)       # nie abgerufen -> zählt nicht
+        _add(conn, "sw0200", None)       # nie abgerufen -> zählt mit
         _add(conn, "fig-9999", old)      # ohne BrickLink-Nr. -> zählt nicht
     body = client.get("/api/price_log").json()
-    assert body["stale_count"] == 2
-    assert body["stale_days"] == 7
+    assert body["stale_count"] == 3
+    assert body["stale_hours"] == 26        # ohne Schlüssel: der Hub
 
 
 def test_pricelog_zero_when_all_fresh(client):
@@ -171,8 +173,12 @@ def test_kleine_sammlungen_bleiben_beim_alten_takt():
 def test_der_deckel_schuetzt_das_kontingent():
     """Auch eine riesige Sammlung darf den Zugang nicht sprengen."""
     assert main.preis_stapel(10 ** 6) == main.PRICE_STAPEL_MAX
+    # Seit 3.9.17 stündlich, damit nichts älter als 24 Stunden wird. Mit
+    # Rücklage und Namen muss es unter BrickLinks 5.000 bleiben.
     rufe = main.PRICE_STAPEL_MAX * main.PRICE_LAEUFE_JE_TAG * 2
-    assert rufe <= 2000, "%d BrickLink-Rufe am Tag sind zu viel" % rufe
+    assert rufe + main.BRICKLINK_RUECKLAGE \
+        + main.KATALOG_NAMEN_MIN * main.NAMEN_LAEUFE_JE_TAG \
+        <= main.BRICKLINK_TAGESBUDGET, "%d BrickLink-Rufe am Tag sind zu viel" % rufe
 
 
 def test_die_aeltesten_kommen_zuerst_dran():
@@ -181,7 +187,7 @@ def test_die_aeltesten_kommen_zuerst_dran():
     jedem Lauf wieder vorn – die dahinter kämen nie an die Reihe."""
     quelle = (Path(__file__).resolve().parents[1] / "backend"
               / "main.py").read_text()
-    block = quelle.split("def _price_refresher")[1]
+    block = quelle.split("def _preise_auffrischen")[1]
     block = block[:block.index("for row in rows")]
     assert "ORDER BY COALESCE(price_updated_at, 0)" in block
     assert "LIMIT 40" not in block, "der feste Stapel ist wieder da"

@@ -1,7 +1,9 @@
 """Nupplo – FastAPI-Backend (Scan, Sammlung, Benutzer)."""
+import asyncio
 import base64
 import hashlib
 import collections
+import functools
 import html
 import io
 import ipaddress
@@ -20,14 +22,19 @@ import requests
 from fastapi import (Depends, FastAPI, File, HTTPException, Request,
                      Response, UploadFile)
 from fastapi.exceptions import RequestValidationError
+from starlette.concurrency import run_in_threadpool
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+import brickmerge
+import cmf
 import core
 import crypto_box
+import figurteile
 import hub
+import hubpreise
 import integrations
 import katalogschutz
 import namensfarben
@@ -45,7 +52,10 @@ FRONTEND_DIR = os.environ.get("FRONTEND_DIR", "/app/frontend")
 # Betrifft auch app.js, style.css und index.html. Hinter dem Cloudflare-Tunnel
 # würde Cloudflare komprimieren; im Heimnetz, wo die meisten die App
 # benutzen, tat es bisher niemand.
-app.add_middleware(GZipMiddleware, minimum_size=1024)
+# Stufe 6 statt der Voreinstellung 9: Gemessen an app.js 22 statt 45 ms
+# Rechenzeit für 179,1 statt 178,5 KB – praktisch dieselbe Größe für die
+# Hälfte der CPU, und die ist auf einem NAS knapp.
+app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=6)
 
 
 @app.middleware("http")
@@ -87,7 +97,11 @@ async def security_headers(request: Request, call_next):
             # dieser Seite, kann also nichts von außen nachladen.
             "img-src 'self' data: blob: https://img.bricklink.com "
             "https://cdn.rebrickable.com https://*.bricklink.com "
-            "https://*.rebrickable.com https://storage.googleapis.com",
+            "https://*.rebrickable.com https://storage.googleapis.com "
+            # Brickmerges Setbilder lädt der Browser selbst (3.9.13), nur
+            # mit „Setbilder von Brickmerge zeigen“ – der Server behält
+            # davon keine Kopie.
+            "https://www.brickmerge.de",
             "style-src 'self' 'unsafe-inline'",
             "script-src 'self'",
             "connect-src 'self'",
@@ -228,6 +242,23 @@ def extern_stand() -> dict:
 
 
 @app.middleware("http")
+async def preise_verfallen_lassen(request: Request, call_next):
+    """Vor jeder Antwort: zu alte zentrale Preise aus dem Weg räumen.
+
+    Höchstens einmal je Minute, siehe `_preise_verfallen`. So hängt die
+    Grenze nicht am stündlichen Hintergrundlauf.
+    """
+    if request.url.path.startswith("/api/") \
+            and time.time() - _verfall_zuletzt[0] > 60:
+        _verfall_zuletzt[0] = time.time()
+        try:
+            await run_in_threadpool(_preise_verfallen)
+        except Exception:
+            pass
+    return await call_next(request)
+
+
+@app.middleware("http")
 async def extern_beobachten(request: Request, call_next):
     response = await call_next(request)
     try:
@@ -236,7 +267,10 @@ async def extern_beobachten(request: Request, call_next):
                 and response.status_code < 400:
             art = _extern_art(request)
             if art:
-                _extern_merken(*art)
+                # Im Threadpool: `_extern_merken` schreibt alle paar Minuten
+                # in die Datenbank, und das darf die Ereignisschleife nicht
+                # anhalten, während ein Hintergrundlauf die Datei sperrt.
+                await run_in_threadpool(_extern_merken, *art)
     except Exception:
         pass                      # Beobachten darf nie eine Anfrage stören
     return response
@@ -273,6 +307,9 @@ def startup():
     except Exception as e:                      # nie am Start scheitern
         print(f"[nupplo] Hinweis zur Umbenennung übersprungen: {e}", flush=True)
     threading.Thread(target=_price_refresher, daemon=True).start()
+    threading.Thread(target=_preis_takt, daemon=True).start()
+    threading.Thread(target=hubpreise.waechter,
+                     args=(integrations.price_region,), daemon=True).start()
     threading.Thread(target=_sicherungs_waechter, daemon=True).start()
     # Die breiten Merkmalswörter im Hintergrund bereitlegen. Steht das
     # Ergebnis schon in den Einstellungen, ist das in Millisekunden vorbei;
@@ -312,7 +349,7 @@ def _sicherungs_waechter():
                   flush=True)
         time.sleep(SICHERUNG_TAKT)
 
-def preis_stapel(anzahl: int) -> int:
+def preis_stapel(anzahl: int, stale_s: int = 0) -> int:
     """Wie viele Einträge ein Lauf nimmt, damit alle rechtzeitig drankommen.
 
     **Vorher waren es feste 40 – und das reichte irgendwann nicht mehr.**
@@ -332,18 +369,170 @@ def preis_stapel(anzahl: int) -> int:
     wieder länger als sieben Tage. Das ist Absicht: Lieber ein ehrlicher
     Rückstand als ein gesperrter Zugang.
     """
-    tage = PRICE_STALE_SECONDS / 86400
+    # Seit 3.9.17 muss eine Runde so schnell durch sein, wie neu geholt
+    # wird (`_auffrischen_nach_s`), bei stündlichen Läufen.
+    tage = (stale_s or PRICE_STALE_SECONDS) / 86400
     noetig = anzahl / (tage * PRICE_LAEUFE_JE_TAG)
     return max(PRICE_STAPEL_MIN,
                min(PRICE_STAPEL_MAX, math.ceil(noetig * 1.25)))
 
 
-def _price_refresher():
-    """Frischt Ø-Preise auf, die älter als 7 Tage sind (max. 40 pro Lauf)."""
+def _preis_takt():
+    """Stündlich: Altes verfallen lassen, dann frische Preise holen.
+
+    Bis 3.9.16 lief das im Zwölf-Stunden-Takt und frischte erst nach
+    sieben Tagen auf. Jetzt wird jede Stunde geholt, was fällig ist: aus
+    dem Hub alles älter als `PRICE_STALE_SECONDS` (20 Stunden), mit eigenem
+    Schlüssel nach dem Abstand, den der Betreiber gewählt hat.
+    """
     time.sleep(120)   # Start nicht ausbremsen
     while True:
         try:
-            if integrations.bricklink_enabled():
+            _preise_verfallen()
+            _preise_auffrischen()
+        except Exception as e:
+            print(f"[nupplo] Preis-Refresh übersprungen: {e}", flush=True)
+        time.sleep(3600)
+
+
+def _preis_artikel() -> int:
+    """Wie viele Einträge aller Listen einen Preis brauchen."""
+    with core.db() as conn:
+        return sum(conn.execute(
+            f"SELECT COUNT(*) FROM {table} WHERE "
+            "item_id NOT LIKE 'fig-%' AND item_id NOT LIKE "
+            "'manuell-%' AND item_id NOT LIKE 'custom-%'").fetchone()[0]
+            for table in PRICE_TABLES)
+
+
+# Mit eigenem Schlüssel entscheidet der Betreiber, wie oft geholt wird:
+# „wenn jemand seinen eigenen Bricklink-Key eingibt, sollte er selbst
+# entscheiden können wie oft der die Preise abruft. Das einzige was wir
+# machen, dass wir voreingestellt aller 24 Stunden angeben.“ – „und ich
+# würde es in Stunden angeben.“ (15.10.2026)
+PREISABRUF_STD = 24
+PREISABRUF_MAX = 720             # 30 Tage
+
+
+def preisabruf_stunden() -> int:
+    """Alle wie viele Stunden mit eigenem Schlüssel neu geholt wird."""
+    try:
+        n = int(core.get_setting("preisabruf_stunden") or 0)
+    except (TypeError, ValueError):
+        n = 0
+    return n if 1 <= n <= PREISABRUF_MAX else PREISABRUF_STD
+
+
+def _auffrischen_nach_s() -> int:
+    """Ab welchem Alter ein Preis neu geholt wird.
+
+    Aus dem Hub nach 20 Stunden – das bleibt unter seinen 26. Mit eigenem
+    Schlüssel nach der gewählten Zahl Stunden, eine halbe Stunde früher,
+    damit der stündliche Lauf sie nicht um fast eine Stunde verpasst.
+    """
+    if hubpreise.an():
+        return PRICE_STALE_SECONDS
+    return max(1800, preisabruf_stunden() * 3600 - 1800)
+
+
+def _anzeige_ab() -> int:
+    """Gespeicherte Preise, die älter sind, werden nicht gezeigt.
+
+    Seit 3.9.31 gibt es diese Grenze nicht mehr (0): Ein Preis verschwindet
+    nie, er bleibt mit seinem Stand stehen, bis ein neuerer kommt (30.10.2026). Bis 3.9.30 löschte die Instanz Figurenpreise aus dem Hub
+    nach 26 Stunden – holte der Preisdienst nicht rechtzeitig nach, stand
+    die Figur ohne Preis da (Testsammlung: 173 statt 161 ohne Preis).
+    """
+    return 0
+
+
+def _preise_auffrischen() -> None:
+    """Was älter als `_auffrischen_nach_s` ist, neu holen.
+
+    Aus dem Hub wird nur im lokalen Abzug nachgeschlagen; das kostet nichts
+    und darf deshalb alles auf einmal nehmen.
+    """
+    if not integrations.preise_moeglich():
+        return
+    hub_an = hubpreise.an()
+    nach = _auffrischen_nach_s()
+    # Der Stapel gilt für alle Listen zusammen, die Sammlung kommt zuerst.
+    rest = -1 if hub_an else preis_stapel(_preis_artikel(), nach)
+    for table in PRICE_TABLES:
+        if rest == 0:
+            break
+        cutoff = int(time.time()) - nach
+        with core.db() as conn:
+            # **Zuerst die ältesten.** Ohne `ORDER BY` entscheidet die
+            # Zeilennummer, und ein Artikel, dessen Abruf dauernd scheitert,
+            # käme in jedem Lauf wieder vorn zu liegen – während die dahinter
+            # nie an die Reihe kämen.
+            rows = conn.execute(
+                f"SELECT * FROM {table} WHERE "
+                "item_id NOT LIKE 'fig-%' AND item_id NOT LIKE 'manuell-%' "
+                "AND item_id NOT LIKE 'custom-%' "
+                "AND (price_updated_at IS NULL OR price_updated_at < ?) "
+                "ORDER BY COALESCE(price_updated_at, 0) "
+                "LIMIT ?", (cutoff, rest)).fetchall()
+        if rest > 0:
+            rest -= len(rows)
+        geholt = 0
+        for row in rows:
+            # Nupplo für Windows: Ist das Tageslimit dieses Geräts erreicht,
+            # warten die übrigen bis morgen (`integrations.kontingent_stand`).
+            if not hub_an and desktop.an() and not integrations.kontingent_stand()["frei"]:
+                rest = 0
+                break
+            try:
+                _fetch_and_store_prices(dict(row), table)
+                geholt += 1
+            except Exception:
+                pass
+            # BrickLink nicht fluten; der Hub-Abzug liegt lokal.
+            time.sleep(0 if hub_an else 2)
+        if geholt:
+            print(f"[nupplo] Preis-Refresh ({table}): "
+                  f"{geholt} Einträge", flush=True)
+
+
+# Wann zuletzt verfallen gelassen wurde – siehe `preise_verfallen_lassen`.
+_verfall_zuletzt = [0.0]
+
+
+def _preise_verfallen() -> int:
+    """Zentrale Figurenpreise älter als `hubpreise.FRISCH_STUNDEN` leeren.
+    Setpreise bleiben bis zu einem neueren Abruf stehen. Mit eigenem
+    Schlüssel geschieht nichts (`_anzeige_ab`).
+
+    **Gelöscht wird nur, was angezeigt würde**: Ø-Preise und die
+    Preisübersicht am Eintrag. Wann zuletzt geholt wurde, bleibt stehen –
+    daran hängen Reihenfolge und Hinweise. Damit zeigt keine Ansicht mehr
+    einen alten Figurenpreis, ohne dass jede Stelle einzeln prüfen muss.
+    """
+    grenze = _anzeige_ab()
+    if not grenze:
+        return 0
+    n = 0
+    with core.db() as conn:
+        for table in PRICE_TABLES:
+            n += conn.execute(
+                f"UPDATE {table} SET price_new = NULL, price_used = NULL, "
+                "price_data = NULL WHERE COALESCE(price_updated_at, 0) < ? "
+                "AND item_type != 'set' "
+                "AND (price_new IS NOT NULL OR price_used IS NOT NULL "
+                "OR price_data IS NOT NULL)", (grenze,)).rowcount
+    return n
+
+def _price_refresher():
+    """Jahre und Set-Inhalte nachtragen, Katalog und Teiledatei holen.
+    Die Preise selbst holt `_preis_takt`."""
+    time.sleep(120)   # Start nicht ausbremsen
+    while True:
+        try:
+            # Preise gehen auch ohne eigenen Schlüssel, wenn sie aus dem Hub
+            # kommen; Jahre und Set-Inhalte brauchen dagegen BrickLink.
+            mit_bl = integrations.bricklink_enabled()
+            if integrations.preise_moeglich():
                 for table in PRICE_TABLES:
                     # Fehlende Erscheinungsjahre nachtragen (NULL = nie geprüft)
                     with core.db() as conn:
@@ -351,6 +540,8 @@ def _price_refresher():
                             f"SELECT id, item_type, item_id FROM {table} WHERE "
                             "year IS NULL AND item_id NOT LIKE 'fig-%' "
                             "AND item_id NOT LIKE 'manuell-%' LIMIT 60").fetchall()
+                    if not mit_bl:
+                        yrows = []
                     filled = 0
                     for r in yrows:
                         try:
@@ -371,39 +562,14 @@ def _price_refresher():
                     if filled:
                         print(f"[nupplo] Jahres-Nachtrag ({table}): "
                               f"{filled} Einträge", flush=True)
-                    cutoff = int(time.time()) - PRICE_STALE_SECONDS
-                    with core.db() as conn:
-                        # **Zuerst die ältesten.** Ohne `ORDER BY` entscheidet
-                        # die Zeilennummer, und ein Artikel, dessen Abruf
-                        # dauernd scheitert, käme in jedem Lauf wieder vorn
-                        # zu liegen – während die dahinter nie an die Reihe
-                        # kämen.
-                        stapel = preis_stapel(conn.execute(
-                            f"SELECT COUNT(*) FROM {table} WHERE "
-                            "item_id NOT LIKE 'fig-%' AND item_id NOT LIKE "
-                            "'manuell-%' AND item_id NOT LIKE 'custom-%'"
-                        ).fetchone()[0])
-                        rows = conn.execute(
-                            f"SELECT * FROM {table} WHERE "
-                            "item_id NOT LIKE 'fig-%' AND item_id NOT LIKE 'manuell-%' AND item_id NOT LIKE 'custom-%' "
-                            "AND (price_updated_at IS NULL OR price_updated_at < ?) "
-                            "ORDER BY COALESCE(price_updated_at, 0) "
-                            "LIMIT ?", (cutoff, stapel)).fetchall()
-                    for row in rows:
-                        try:
-                            _fetch_and_store_prices(dict(row), table)
-                        except Exception:
-                            pass
-                        time.sleep(2)   # BrickLink nicht fluten
-                    if rows:
-                        print(f"[nupplo] Preis-Refresh ({table}): "
-                              f"{len(rows)} Einträge", flush=True)
                 with core.db() as conn:
                     srows = conn.execute(
                         "SELECT DISTINCT item_id FROM collection WHERE "
                         "item_type = 'set' AND item_id NOT LIKE 'manuell-%' "
                         "AND item_id NOT IN (SELECT set_no FROM set_meta) "
                         "LIMIT 10").fetchall()
+                if not mit_bl:
+                    srows = []
                 for r in srows:
                     try:
                         _store_set_contents(
@@ -431,6 +597,22 @@ def _price_refresher():
             _katalog_ziehen()
         except Exception as e:
             print(f"[nupplo] Katalog holen übersprungen: {e}", flush=True)
+        try:
+            figurteile.ziehen()
+        except Exception as e:
+            print(f"[nupplo] Teiledatei holen übersprungen: {e}", flush=True)
+        try:
+            _setnamen_ziehen()
+        except Exception as e:
+            print(f"[nupplo] Setnamen holen übersprungen: {e}", flush=True)
+        try:
+            _setdaten_ziehen()
+        except Exception as e:
+            print(f"[nupplo] Setdaten holen übersprungen: {e}", flush=True)
+        try:
+            _junge_sets_nachpruefen()
+        except Exception as e:
+            print(f"[nupplo] Junge Sets prüfen übersprungen: {e}", flush=True)
         try:
             # Nach dem Ziehen: Die neuen Zeilen haben noch keinen Namen.
             _katalog_namen()
@@ -1113,6 +1295,8 @@ def price_log(limit: int = 50, user: dict = Depends(dealer_user)):
     außerhalb der letzten 50 Zeilen, und mit `LIMIT` davor wäre er weg.
     """
     limit = max(1, min(limit, 200))
+    stunden = hubpreise.FRISCH_STUNDEN if hubpreise.an() \
+        else preisabruf_stunden()
     with core.db() as conn:
         rows = conn.execute(
             "WITH verlauf AS ("
@@ -1135,16 +1319,19 @@ def price_log(limit: int = 50, user: dict = Depends(dealer_user)):
             "  AND w.item_type = v.item_type "
             "LEFT JOIN shopping_items si ON si.item_id = v.item_id "
             "  AND si.item_type = v.item_type "
+            # Aus dem Hub nur, was höchstens 26 Stunden alt ist: Das
+            # Protokoll zeigt Preise, und ältere dürfen nicht dastehen.
+            "WHERE v.ts >= ? "
             "GROUP BY v.rid "
-            "ORDER BY v.ts DESC LIMIT ?", (limit,)).fetchall()
-        cutoff = int(time.time()) - PRICE_STALE_SECONDS
+            "ORDER BY v.ts DESC LIMIT ?",
+            (_anzeige_ab(), limit)).fetchall()
         stale = conn.execute(
             "SELECT COUNT(*) AS c FROM collection WHERE "
             "item_id NOT LIKE 'fig-%' AND item_id NOT LIKE 'manuell-%' AND item_id NOT LIKE 'custom-%' "
-            "AND price_updated_at IS NOT NULL AND price_updated_at < ?",
-            (cutoff,)).fetchone()["c"]
+            "AND COALESCE(price_updated_at, 0) < ?",
+            (int(time.time()) - stunden * 3600,)).fetchone()["c"]
     return {"entries": [dict(r) for r in rows],
-            "stale_count": stale, "stale_days": PRICE_STALE_SECONDS // 86400}
+            "stale_count": stale, "stale_hours": stunden}
 
 
 @app.get("/api/update_check")
@@ -1334,6 +1521,22 @@ def katalog_stand(user: dict = Depends(admin_user)):
             "          AND merkmale NOT IN ('', '–') THEN 1 ELSE 0 END)"
             " AS ohne_namen"
             " FROM katalog_index").fetchone()
+        # Was der Katalog seit 3.9.x ohne BrickLink mitbringt (Setdatei,
+        # Setnamen, Teileliste). Die Karte zeigt danach nur noch die
+        # BrickLink-Wege, die wirklich etwas nachzuholen hätten.
+        zusatz = conn.execute(
+            "SELECT"
+            " (SELECT COUNT(*) FROM set_daten) AS setdaten,"
+            " (SELECT COUNT(*) FROM set_namen WHERE sprache = 'de')"
+            "   AS setnamen,"
+            " (SELECT COUNT(*) FROM figurteile) AS figurteile,"
+            # Sets mit BrickLink-Kategorie (aus der Sets.xml), deren Baum
+            # noch fehlt. Nur dafür ist „Kategorien holen“ gut – Sets aus
+            # der Setdatei tragen ihr Thema als `rb:<Thema>` selbst.
+            " (SELECT COUNT(*) FROM katalog_index k WHERE k.item_type = 'set'"
+            "   AND k.category_id != '' AND k.category_id NOT LIKE 'rb:%'"
+            "   AND k.category_id NOT IN (SELECT id FROM katalog_kategorien))"
+            "   AS sets_ohne_thema").fetchone()
     return {"aktiv": core.get_setting("katalog_aus") != "1",
             "figuren": r["figuren"] or 0,
             "sets": r["sets"] or 0,
@@ -1343,6 +1546,10 @@ def katalog_stand(user: dict = Depends(admin_user)):
             # eigenen Zugang nach. Gefunden wird die Figur trotzdem – dafür
             # sorgt die Beschreibung.
             "ohne_namen": r["ohne_namen"] or 0,
+            "setdaten": zusatz["setdaten"] or 0,
+            "setnamen": zusatz["setnamen"] or 0,
+            "figurteile": zusatz["figurteile"] or 0,
+            "sets_ohne_thema": zusatz["sets_ohne_thema"] or 0,
             "namen_laufen": _namen_lauf["aktiv"],
             "namen_fehler": _namen_lauf["fehler"],
             "hat_bricklink": integrations.bricklink_enabled(),
@@ -1370,24 +1577,47 @@ def _bricklink_link(item_no: str, item_type: str) -> str:
     return ("https://www.bricklink.com/v2/catalog/catalogitem.page?"
             + kuerzel + "=" + item_no)
 
+@functools.lru_cache(maxsize=65536)
 def _nummer_teile(item_no: str):
-    """Kürzel und Zifferngruppe, z. B. `sw0001a` → `("sw", "0001")`."""
+    """Kürzel und Zifferngruppe, z. B. `sw0001a` → `("sw", "0001")`.
+
+    Gemerkt, weil Themenliste und Katalogliste sie für jede der 19.000
+    Nummern bei jedem Aufruf brauchen – auf dem NAS war das ein großer Teil
+    der 0,8 s, die die Themenliste nach 3.8.2 noch brauchte. Die Antwort
+    hängt allein an der Nummer.
+    """
     m = re.match(r"^([a-z]+)(\d+)", (item_no or "").strip().lower())
     return (m.group(1), m.group(2)) if m else ("", "")
 
 
 # Kategoriebaum, im Prozess gehalten – er ändert sich im Jahrestakt.
 _kategorien_cache: dict = {}
+# Eigenes Merkmal statt „Cache nicht leer“: Die Tabelle ist leer, bis ein
+# Admin den Baum einmal holt – und das ist auf den meisten Instanzen nie
+# geschehen. Bis 3.8.1 las deshalb jeder Aufruf neu, und `_thema_von` ruft
+# ihn für jede Figur mit Ziffernnummer: ~1.280 Verbindungen je Themenliste,
+# gemessen 1,2 s, auf dem NAS mehrere Sekunden bei jedem Öffnen des Katalogs.
+_kategorien_geladen = False
+
+
+def _kategorien_vergessen() -> None:
+    """Nach dem Holen des Baums – der nächste Aufruf liest neu."""
+    global _kategorien_geladen
+    _kategorien_cache.clear()
+    _themen_cache.clear()
+    _kategorien_geladen = False
 
 
 def _kategorien_lesen() -> dict:
     """`{id: (name, eltern_id)}` aus der Datenbank, einmal je Prozess."""
-    if _kategorien_cache:
+    global _kategorien_geladen
+    if _kategorien_geladen:
         return _kategorien_cache
     with core.db() as conn:
         for r in conn.execute(
                 "SELECT id, name, parent_id FROM katalog_kategorien"):
             _kategorien_cache[r["id"]] = (r["name"], r["parent_id"])
+    _kategorien_geladen = True
     return _kategorien_cache
 
 
@@ -1398,6 +1628,10 @@ def _kategorie_oberthema(cid: str) -> str:
     Für die Auswahl will man das Dach, nicht jeden Zweig – sonst stünden
     dort hunderte Einträge mit je einer Handvoll Sets.
     """
+    # Sets aus der Setdatei (3.9.3) tragen statt einer BrickLink-Kategorie
+    # gleich Rebrickables Thema – BrickLinks Baum kennt sie nicht.
+    if str(cid or "").startswith("rb:"):
+        return str(cid)[3:]
     baum = _kategorien_lesen()
     gesehen = set()
     aktuell = str(cid or "")
@@ -1408,6 +1642,12 @@ def _kategorie_oberthema(cid: str) -> str:
             return name
         aktuell = eltern
     return ""
+
+
+# Thema je (Nummer, Kategorie), im Prozess gemerkt – aus demselben Grund wie
+# bei `_nummer_teile`. Hängt außerdem am Kategoriebaum und an den
+# Bereichsregeln in `themes`; deshalb leert `_kategorien_vergessen` es mit.
+_themen_cache: dict = {}
 
 
 def _thema_von(item_no: str, kategorie: str = "") -> str:
@@ -1421,10 +1661,20 @@ def _thema_von(item_no: str, kategorie: str = "") -> str:
     steht nur in der BrickLink-Kategorie. Deshalb der zweite Weg über den
     Kategoriebaum, sobald die Nummer nicht mit Buchstaben beginnt.
     """
+    schluessel = (item_no, kategorie or "")
+    if schluessel in _themen_cache:
+        return _themen_cache[schluessel]
     kuerzel, _ = _nummer_teile(item_no)
     if not kuerzel:
-        return _kategorie_oberthema(kategorie)
-    return themes.from_minifig_number(item_no) or kuerzel.upper()
+        thema = _kategorie_oberthema(kategorie)
+    else:
+        thema = themes.from_minifig_number(item_no) or kuerzel.upper()
+    # Die Schlüssel kommen aus dem Katalog (rund 19.000 Nummern), aber auch
+    # aus Sammlungseinträgen von Hand – damit das nicht ohne Ende wächst:
+    if len(_themen_cache) > 100_000:
+        _themen_cache.clear()
+    _themen_cache[schluessel] = thema
+    return thema
 
 
 def _praefixe_zum_thema(thema: str) -> list:
@@ -1653,11 +1903,27 @@ def katalog_liste(thema: str = "", art: str = "minifig", q: str = "",
             bedingung.append("(such LIKE ? OR lower(item_no) LIKE ?)")
             n = "%" + _such_norm(q.strip()) + "%"
             werte += [n, "%" + q.strip().lower() + "%"]
-        rows = conn.execute(
-            "SELECT item_no, name, img_url, jahr, category_id"
-            " FROM katalog_index"
-            " WHERE " + " AND ".join(bedingung) + " ORDER BY item_no",
-            werte).fetchall()
+        wo = " WHERE " + " AND ".join(bedingung)
+        # **Ohne Thema und ohne `nur` blättert SQL selbst.** Bis 3.8.1 lud
+        # jede Seite mit 60 Einträgen den ganzen Katalog – 19.000 Zeilen
+        # samt Sammlung und Wunschliste – und schnitt danach zurecht:
+        # gemessen 77 ms je Seite, auf dem NAS ein Vielfaches bei jedem
+        # Weiterblättern. Mit Thema oder `nur` geht das nicht: Dort
+        # entscheiden `_thema_von` und der Besitzstand erst in Python, was
+        # dazugehört – und die Liste eines Themas ist ohnehin kurz.
+        seitenweise = not thema and nur not in ("fehlt", "habe", "wunsch")
+        if seitenweise:
+            gesamt = conn.execute("SELECT COUNT(*) FROM katalog_index" + wo,
+                                  werte).fetchone()[0]
+            rows = conn.execute(
+                "SELECT item_no, name, img_url, jahr, category_id"
+                " FROM katalog_index" + wo + " ORDER BY item_no"
+                " LIMIT ? OFFSET ?", werte + [limit, offset]).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT item_no, name, img_url, jahr, category_id"
+                " FROM katalog_index" + wo + " ORDER BY item_no",
+                werte).fetchall()
 
         besitz: dict = {}
         for r in conn.execute(
@@ -1715,6 +1981,9 @@ def katalog_liste(thema: str = "", art: str = "minifig", q: str = "",
     for e in eintraege:
         e.pop("kuerzel", None)
 
+    if seitenweise:
+        return {"gesamt": gesamt, "eintraege": eintraege,
+                "hat_katalog": bool(gesamt) or _katalogsuche_moeglich()}
     return {"gesamt": len(eintraege),
             "eintraege": eintraege[offset:offset + limit],
             "hat_katalog": bool(rows) or _katalogsuche_moeglich()}
@@ -1885,6 +2154,15 @@ async def katalog_datei(request: Request, user: dict = Depends(admin_user)):
     selbst in der Warteschlange.
     """
     roh = await request.body()
+    # **Die Arbeit läuft im Threadpool, nicht hier.** Bis 3.8.1 lief das
+    # Einlesen – bis 40 MB XML und rund 19.000 Abfragen plus Schreibvorgänge –
+    # direkt in der Ereignisschleife. Solange es lief, stand die ganze
+    # Instanz: keine Seiten, keine Bilder, kein Nupplo Connect. Auf einem
+    # NAS etliche Sekunden. Nur das Lesen des Körpers braucht `async`.
+    return await run_in_threadpool(_katalog_datei_einlesen, roh)
+
+
+def _katalog_datei_einlesen(roh: bytes) -> dict:
     if not roh:
         raise HTTPException(400, "Keine Datei empfangen")
     if len(roh) > KATALOG_DATEI_MAX:
@@ -2002,7 +2280,7 @@ def katalog_kategorien_holen(user: dict = Depends(admin_user)):
                 " parent_id = excluded.parent_id,"
                 " geholt_at = excluded.geholt_at",
                 (cid, name, eltern, jetzt))
-    _kategorien_cache.clear()
+    _kategorien_vergessen()
     return {"ok": True, "kategorien": len(baum)}
 
 
@@ -2018,6 +2296,21 @@ def _katalog_beim_oeffnen() -> None:
         _katalog_ziehen()
     except Exception as e:
         print(f"[nupplo] Katalog beim Öffnen übersprungen: {e}", flush=True)
+    # Die Teiledatei trägt auch die von Hand eingetragenen Doppelgänger.
+    # Nur im Zwölfstundenlauf geholt, kam ein neues Paar in der SE einen
+    # halben Tag nach dem iPhone an (17.10.2026). Mit ETag kostet es nichts.
+    try:
+        figurteile.ziehen()
+    except Exception as e:
+        print(f"[nupplo] Teiledatei beim Öffnen übersprungen: {e}", flush=True)
+    try:
+        _setnamen_ziehen()
+    except Exception as e:
+        print(f"[nupplo] Setnamen beim Öffnen übersprungen: {e}", flush=True)
+    try:
+        _setdaten_ziehen()
+    except Exception as e:
+        print(f"[nupplo] Setdaten beim Öffnen übersprungen: {e}", flush=True)
     finally:
         _katalog_sperre.release()
 
@@ -2053,6 +2346,18 @@ def katalog_holen_jetzt(user: dict = Depends(admin_user)):
         erg = _katalog_ziehen()
     except Exception as e:
         raise HTTPException(502, fehlertext(e))
+    try:
+        erg["figurteile"] = figurteile.ziehen().get("geholt", 0)
+    except Exception as e:
+        print(f"[nupplo] Teiledatei holen übersprungen: {e}", flush=True)
+    try:
+        erg["setnamen"] = _setnamen_ziehen().get("geholt", 0)
+    except Exception as e:
+        print(f"[nupplo] Setnamen holen übersprungen: {e}", flush=True)
+    try:
+        erg["setdaten"] = _setdaten_ziehen().get("geholt", 0)
+    except Exception as e:
+        print(f"[nupplo] Setdaten holen übersprungen: {e}", flush=True)
     threading.Thread(target=_katalog_namen, daemon=True).start()
     return erg
 
@@ -2467,7 +2772,7 @@ def _katalog_changelog() -> dict:
 # GitHub für jede Installation erreichbar, ohne dass jemand einen Zugang von
 # irgendwem braucht und ohne dass bei irgendwem etwas laufen muss.
 #
-# **Seit 3.8.2 verschlüsselt** (`katalogschutz.py`). An der alten Adresse
+# **Seit 3.9.15 verschlüsselt** (`katalogschutz.py`). An der alten Adresse
 # steht nur noch ein Hinweis für ältere Fassungen, der ihre Suche um ein
 # Update bitten lässt. Wer die alte Adresse von Hand eingetragen hatte – sie
 # war bis dahin die Vorgabe –, wird still auf die neue umgelenkt; sonst
@@ -2528,27 +2833,32 @@ BRICKLINK_RUECKLAGE = 900
 def katalog_namen_je_lauf() -> int:
     """Wie viele Namen ein Lauf nachschlägt – der Rest des Tagesbudgets.
 
-    Geschätzt wird der Preisbedarf so, wie ihn `preis_stapel` bemisst: zwei
-    API-Rufe je Artikel, `PRICE_LAEUFE_JE_TAG` Läufe. Das ist die obere
-    Schranke, nicht der tatsächliche Verbrauch – ein Lauf holt nur, was
-    wirklich älter als sieben Tage ist. Lieber zu vorsichtig schätzen: Ein
+    Geschätzt wird der Preisbedarf mit `preise_je_tag`: zwei API-Rufe je
+    Artikel. Das ist die obere Schranke, nicht der tatsächliche Verbrauch –
+    ein Lauf holt nur, was wirklich älter als 20 Stunden ist. Lieber zu vorsichtig schätzen: Ein
     gesperrter Zugang kostet mehr als ein Tag Wartezeit.
     """
     try:
-        with core.db() as conn:
-            preise = 0
-            for table in PRICE_TABLES:
-                anzahl = conn.execute(
-                    f"SELECT COUNT(*) FROM {table} WHERE "
-                    "item_id NOT LIKE 'fig-%' AND item_id NOT LIKE "
-                    "'manuell-%' AND item_id NOT LIKE 'custom-%'"
-                ).fetchone()[0]
-                preise += preis_stapel(anzahl) * 2 * PRICE_LAEUFE_JE_TAG
+        preise = preise_je_tag(_preis_artikel()) * 2
     except Exception:
         return KATALOG_NAMEN_MIN          # im Zweifel bescheiden
     frei = BRICKLINK_TAGESBUDGET - preise - BRICKLINK_RUECKLAGE
     return max(KATALOG_NAMEN_MIN,
-               min(KATALOG_NAMEN_MAX, frei // PRICE_LAEUFE_JE_TAG))
+               min(KATALOG_NAMEN_MAX, frei // NAMEN_LAEUFE_JE_TAG))
+
+
+# Der Namenslauf hängt am Zwölf-Stunden-Takt von `_price_refresher`.
+NAMEN_LAEUFE_JE_TAG = 2
+
+
+def preise_je_tag(anzahl: int) -> int:
+    """Höchstens so viele Artikel holt `_preis_takt` am Tag: nie mehr, als
+    der Stapel erlaubt, und nie öfter als alle `_auffrischen_nach_s`."""
+    if anzahl <= 0:
+        return 0
+    nach = _auffrischen_nach_s()
+    return min(preis_stapel(anzahl, nach) * PRICE_LAEUFE_JE_TAG,
+               math.ceil(anzahl * 86400 / nach))
 
 _namen_lauf = {"aktiv": False, "getan": 0, "stop": False, "fehler": ""}
 
@@ -2627,7 +2937,16 @@ def _katalog_ziehen() -> dict:
                 " ON CONFLICT(item_no, item_type) DO UPDATE SET"
                 " farben = excluded.farben, art = excluded.art,"
                 " merkmale = excluded.merkmale,"
-                " updated_at = excluded.updated_at",
+                " updated_at = excluded.updated_at"
+                # **Nur was sich geändert hat.** Bis 3.8.1 bekam jede Zeile
+                # bei jedem Abzug eine neue Zeit, auch unverändert – und der
+                # Abgleich mit dem externen Zugriff liefert nach Zeit. Jeder
+                # nächtliche Abzug schickte damit allen gekoppelten Geräten
+                # wieder den ganzen Katalog, 19.000 Zeilen, statt der paar
+                # neuen; die Instanz schrieb dazu Megabytes ohne Not.
+                " WHERE katalog_index.farben IS NOT excluded.farben"
+                " OR katalog_index.art IS NOT excluded.art"
+                " OR katalog_index.merkmale IS NOT excluded.merkmale",
                 (nr, integrations.minifig_bild(nr),
                  str(d.get("farben") or ""), str(d.get("art") or ""),
                  merkmale, jetzt))
@@ -2641,6 +2960,435 @@ def _katalog_ziehen() -> dict:
     print("[nupplo] Katalog geholt: %d neu, %d geändert"
           % (neu, geaendert), flush=True)
     return {"geholt": neu + geaendert, "neu": neu, "geaendert": geaendert}
+
+
+# Die Setnamen in anderen Sprachen liegen neben dem Abzug (Katalogdienst
+# 1.19.0). Eigene Datei: Instanzen, die nur Figuren suchen, laden sonst für
+# jedes Set eine Zeile mit.
+SETNAMEN_QUELLE = ("https://raw.githubusercontent.com/Melle79/nupplo/"
+                   "main/katalog/setnamen.ndjson")
+SETNAMEN_MAX_BYTES = 16 * 1024 * 1024
+
+
+def _setnamen_ziehen() -> dict:
+    """Die Setnamen holen, wie LEGO sie auf die Schachtel druckt.
+
+    Anlass: „Supersternzerstörer Executor" fand nichts – BrickLink und
+    Rebrickable kennen das Set nur als „Executor Super Star Destroyer"
+    (10.10.2026). Das Wörterbuch übersetzt vieles, aber nicht jeden Namen;
+    die echten deutschen Namen hat nur LEGO, und die holt der Katalogdienst.
+
+    Die Datei ist ein vollständiger Stand und ersetzt die Tabelle. Fehlt
+    sie (404), ist das kein Fehler: Bis sie veröffentlicht ist, sucht die
+    Instanz wie bisher über das Wörterbuch.
+    """
+    if core.get_setting("katalog_aus") == "1":
+        return {"geholt": 0, "grund": "abgeschaltet"}
+    # Die Umgebung vor der Vorgabe: Die Testinstanz holt die Datei direkt
+    # vom Probe-Katalogdienst im LAN, solange sie noch nicht veröffentlicht
+    # ist (wie FIGURTEILE_QUELLE für die Teileliste).
+    quelle = (core.get_setting("setnamen_quelle")
+              or os.environ.get("SETNAMEN_QUELLE", "").strip()
+              or SETNAMEN_QUELLE)
+    kopf = {"User-Agent": integrations.USER_AGENT}
+    etag = core.get_setting("setnamen_etag")
+    if etag:
+        kopf["If-None-Match"] = etag
+    r = requests.get(quelle, headers=kopf, timeout=120)
+    if r.status_code == 304:
+        return {"geholt": 0, "grund": "unverändert"}
+    if r.status_code == 404:
+        return {"geholt": 0, "grund": "noch keine Datei"}
+    r.raise_for_status()
+    if len(r.content) > SETNAMEN_MAX_BYTES:
+        raise ValueError("Die Setnamendatei ist zu groß")
+    zeilen = []
+    for zeile in r.text.splitlines():
+        try:
+            d = json.loads(zeile)
+        except ValueError:
+            continue
+        nr = str(d.get("nr") or "").strip()
+        sprache = str(d.get("sprache") or "").strip().lower()[:5]
+        name = str(d.get("name") or "").strip()
+        if nr and sprache and name:
+            zeilen.append((nr, sprache, name, core.suchwoerter(name)))
+    if not zeilen:
+        # Eine leere oder kaputte Datei löscht nicht, was schon da ist.
+        return {"geholt": 0, "grund": "leer"}
+    with core.db() as conn:
+        conn.execute("DELETE FROM set_namen")
+        conn.executemany("INSERT OR REPLACE INTO set_namen"
+                         " (nr, sprache, name, woerter) VALUES (?, ?, ?, ?)",
+                         zeilen)
+    if r.headers.get("ETag"):
+        core.set_setting("setnamen_etag", r.headers["ETag"])
+    print("[nupplo] Setnamen geholt: %d" % len(zeilen), flush=True)
+    return {"geholt": len(zeilen)}
+
+
+# Teile, Thema, Jahr und Figuren je Set (Katalogdienst 1.20.0), seit
+# Hub 1.41.0 vom Hub statt von GitHub.
+SETDATEN_MAX_BYTES = 32 * 1024 * 1024
+
+
+def _setdaten_ziehen() -> dict:
+    """Die Angaben für den Set-Steckbrief holen.
+
+    Anlass: Sven wollte bei Sets Teileanzahl, Themenwelt und Jahr sehen wie
+    auf jeder Händlerseite (10.10.2026). Jahr und Thema kamen bis dahin nur
+    über BrickLink, die Teileanzahl gar nicht. Die Datei stammt aus
+    Rebrickables freien Downloads; die Instanz fragt dafür niemanden außer
+    der Quelle selbst.
+
+    Fehlt sie (404), bleibt der Steckbrief wie bisher. Eine leere oder
+    kaputte Datei löscht nicht, was schon da ist.
+    """
+    if core.get_setting("katalog_aus") == "1":
+        return {"geholt": 0, "grund": "abgeschaltet"}
+    # Vom Hub, nicht von GitHub (17.10.2026). Eine eigene Adresse
+    # geht weiter – die Testinstanz zeigt über SETDATEN_QUELLE auf den
+    # Probe-Katalogdienst.
+    quelle = (core.get_setting("setdaten_quelle")
+              or os.environ.get("SETDATEN_QUELLE", "").strip())
+    kopf = {"User-Agent": integrations.USER_AGENT}
+    etag = core.get_setting("setdaten_etag")
+    if etag:
+        kopf["If-None-Match"] = etag
+    if quelle:
+        r = requests.get(quelle, headers=kopf, timeout=120)
+    else:
+        r = hubpreise.katalog_datei("setdaten", kopf)
+    if r.status_code == 304:
+        return {"geholt": 0, "grund": "unverändert"}
+    if r.status_code == 404:
+        return {"geholt": 0, "grund": "noch keine Datei"}
+    r.raise_for_status()
+    if len(r.content) > SETDATEN_MAX_BYTES:
+        raise ValueError("Die Setdatei ist zu groß")
+    sets, figs = [], []
+    for zeile in r.text.splitlines():
+        try:
+            d = json.loads(zeile)
+        except ValueError:
+            continue
+        if not isinstance(d, dict):
+            continue
+        try:
+            if d.get("nr"):
+                figuren = [[str(f)[:20], int(n)] for f, n in d.get("figuren") or []]
+                sets.append((str(d["nr"])[:30], str(d.get("name") or "")[:200],
+                             int(d.get("jahr") or 0), int(d.get("teile") or 0),
+                             str(d.get("thema") or "")[:80],
+                             str(d.get("unterthema") or "")[:80],
+                             json.dumps(figuren),
+                             _monat(d.get("erschienen")),
+                             _monat(d.get("eol"), jahr_reicht=True),
+                             1 if d.get("eol_geschaetzt") is True else 0,
+                             _euro(d.get("uvp_eur")),
+                             json.dumps(_setbilder(d.get("bilder")))))
+            elif d.get("fig"):
+                figs.append((str(d["fig"])[:20], str(d.get("name") or "")[:200],
+                             int(d.get("teile") or 0)))
+        except (TypeError, ValueError):
+            continue                    # eine schiefe Zeile, nicht die Datei
+    if not sets:
+        return {"geholt": 0, "grund": "leer"}
+    with core.db() as conn:
+        conn.execute("DELETE FROM set_daten")
+        conn.execute("DELETE FROM set_daten_fig")
+        conn.executemany("INSERT OR REPLACE INTO set_daten (nr, name, jahr,"
+                         " teile, thema, unterthema, figuren, erschienen, eol,"
+                         " eol_geschaetzt, uvp_eur, bilder)"
+                         " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", sets)
+        conn.executemany("INSERT OR REPLACE INTO set_daten_fig (fig, name,"
+                         " teile) VALUES (?, ?, ?)", figs)
+    if r.headers.get("ETag"):
+        core.set_setting("setdaten_etag", r.headers["ETag"])
+    print("[nupplo] Setdaten geholt: %d Sets" % len(sets), flush=True)
+    try:
+        neu_im_katalog = _sets_in_den_katalog()
+    except Exception as e:
+        neu_im_katalog = 0
+        print(f"[nupplo] Sets in den Katalog übersprungen: {e}", flush=True)
+    try:
+        gefuellt = _setinhalte_nachfuellen()
+    except Exception as e:
+        gefuellt = 0
+        print(f"[nupplo] Setinhalte nachfüllen übersprungen: {e}", flush=True)
+    # Sets tragen ihr Thema als `rb:<Thema>` – der Themenspeicher aus 3.8.2
+    # kennte ein neues sonst erst nach dem nächsten Neustart.
+    _kategorien_vergessen()
+    return {"geholt": len(sets), "setinhalte": gefuellt,
+            "katalog_neu": neu_im_katalog}
+
+
+def _sets_in_den_katalog() -> int:
+    """Sets aus der Setdatei in den Katalog, wo sie noch fehlen.
+
+    Anlass: Der nächtliche Abzug brachte nur Figuren; Sets kamen nur in den
+    Katalog, wenn jemand von Hand BrickLinks `Sets.xml` hochlud. „Die Sets
+    sind ja auch wichtig“ (10.10.2026). Jetzt reichen die freien
+    Rebrickable-Daten.
+
+    **Nur ergänzen, nichts überschreiben.** Wer die `Sets.xml` geladen hat,
+    hat BrickLinks Namen und Kategorien; die bleiben. Das Thema kommt als
+    `rb:<Thema>` in `category_id`, das liest `_kategorie_oberthema`.
+
+    Nur Sets mit Teilen: Bücher, Schlüsselanhänger und Kleidung führt
+    Rebrickable als Sets mit null Teilen, BrickLink gar nicht als Sets.
+    """
+    jetzt = int(time.time())
+    with core.db() as conn:
+        da = {r["item_no"] for r in conn.execute(
+            "SELECT item_no FROM katalog_index WHERE item_type = 'set'")}
+        neu = [r for r in conn.execute(
+            "SELECT nr, name, jahr, thema FROM set_daten WHERE teile > 0"
+            " AND name != ''") if r["nr"] not in da]
+        conn.executemany(
+            "INSERT OR IGNORE INTO katalog_index (item_no, item_type, name,"
+            " such, woerter, img_url, category_id, jahr, updated_at)"
+            " VALUES (?, 'set', ?, ?, ?, ?, ?, ?, ?)",
+            [(r["nr"], r["name"], _wortanfaenge(r["name"])[0],
+              core.suchwoerter(r["name"]),
+              _katalog_bildadresse("set", r["nr"]),
+              "rb:" + r["thema"] if r["thema"] else "",
+              r["jahr"] or 0, jetzt) for r in neu])
+    if neu:
+        _themen_cache.clear()
+        print("[nupplo] Sets in den Katalog: %d neu" % len(neu), flush=True)
+    return len(neu)
+
+
+def _monat(wert, jahr_reicht: bool = False) -> str:
+    """„JJJJ-MM“ oder leer – was sonst in der Datei stünde, kommt nicht in
+    die Oberfläche. Beim EOL reicht ein Jahr: Angekündigt wird oft nur
+    „Ende 2028“."""
+    s = str(wert or "").strip()
+    muster = r"(19[4-9]\d|20\d\d)" + ("(-(0[1-9]|1[0-2]))?" if jahr_reicht
+                                       else "-(0[1-9]|1[0-2])")
+    return s if re.fullmatch(muster, s) else ""
+
+
+def _euro(wert):
+    """UVP in Euro, oder None. Ein Text oder ein Unsinnsbetrag bleibt
+    draußen."""
+    try:
+        v = round(float(wert), 2)
+    except (TypeError, ValueError):
+        return None
+    return v if 0 < v < 100000 else None
+
+
+def _json_liste(text) -> list:
+    try:
+        wert = json.loads(text or "[]")
+    except ValueError:
+        return []
+    return wert if isinstance(wert, list) else []
+
+
+def _setbilder(wert) -> list:
+    """Brickmerges Bilddateien aus der Setdatei, höchstens zwölf.
+
+    Dort stehen nur Dateinamen in `brickmerge.BILDORDNER` (rund 49.000
+    Bilder; mit Adresse wäre die Datei 2 MB größer). Ein Name mit
+    Schrägstrich oder sonst etwas Seltsamem bleibt draußen – die Adresse
+    wird hier zusammengesetzt, und sie darf nirgendwo anders hinzeigen.
+    """
+    if not isinstance(wert, list):
+        return []
+    aus = []
+    for name in wert:
+        if (isinstance(name, str) and re.fullmatch(r"[\w.\-]{1,120}", name)
+                and ".." not in name and name not in aus):
+            aus.append(name)
+    return aus[:12]
+
+
+def _setdaten(nr: str):
+    """Die Zeile zu einer Setnummer. BrickLink und Rebrickable schreiben
+    beide `7190-1`; selbst eingetippt steht oft nur `7190` da."""
+    with core.db() as conn:
+        for kandidat in (nr, nr + "-1") if "-" not in nr else (nr,):
+            row = conn.execute("SELECT * FROM set_daten WHERE nr = ?",
+                               (kandidat,)).fetchone()
+            if row:
+                return row
+    return None
+
+
+def _setname_de(nr: str) -> str:
+    with core.db() as conn:
+        for kandidat in (nr, nr + "-1") if "-" not in nr else (nr,):
+            row = conn.execute("SELECT name FROM set_namen WHERE nr = ? AND"
+                               " sprache = 'de'", (kandidat,)).fetchone()
+            if row and row["name"].strip():
+                return row["name"].strip()
+    return ""
+
+
+def _namen_de_anhaengen(eintraege: list) -> list:
+    """Deutsche Setnamen für die Anzeige anhängen (`name_de`).
+
+    Nur zum Anzeigen: Der gespeicherte Name bleibt, wie er ist – sonst
+    änderte sich still, was in der Sammlung steht, und die Sicherung
+    trüge plötzlich andere Namen (10.10.2026: „in der
+    Sammlungsübersicht stehen noch die englischen Namen“).
+    """
+    nrs = {e.get("item_id") for e in eintraege
+           if (e.get("item_type") or "") == "set" and e.get("item_id")}
+    if not nrs:
+        return eintraege
+    namen = {}
+    with core.db() as conn:
+        liste = sorted(nrs)
+        for i in range(0, len(liste), 500):
+            teil = liste[i:i + 500]
+            for r in conn.execute(
+                    "SELECT nr, name FROM set_namen WHERE sprache = 'de' AND nr IN"
+                    " (%s)" % ",".join("?" * len(teil)), teil):
+                if (r["name"] or "").strip():
+                    namen[r["nr"]] = r["name"].strip()
+    for e in eintraege:
+        if (e.get("item_type") or "") == "set" and e.get("item_id") in namen:
+            e["name_de"] = namen[e["item_id"]]
+    return eintraege
+
+
+@app.get("/api/setdaten/{nr}")
+def setdaten_eines(nr: str, user: dict = Depends(current_user)):
+    """Teile, Thema, Jahr und Figurenzahl für den Set-Steckbrief.
+
+    Keine Zeile ist kein Fehler, nur „weiß ich nicht“: eigene Sets, eine
+    Instanz ohne die Datei. Der Steckbrief zeigt dann einfach nichts dazu.
+    """
+    row = _setdaten(nr)
+    if not row:
+        return {"nr": nr, "bekannt": False, "name_de": _setname_de(nr)}
+    try:
+        figuren = json.loads(row["figuren"] or "[]")
+    except ValueError:
+        figuren = []
+    return {"nr": row["nr"], "bekannt": True, "name": row["name"],
+            "jahr": row["jahr"], "teile": row["teile"],
+            "thema": row["thema"], "unterthema": row["unterthema"],
+            "figuren": sum(int(n) for _, n in figuren),
+            # Über den Katalogdienst, wo bekannt. `eol` ist „JJJJ-MM“ oder
+            # nur „JJJJ“, in der Zukunft das angekündigte Ende;
+            # `eol_geschaetzt` heißt „≈“.
+            "erschienen": row["erschienen"], "eol": row["eol"],
+            "eol_geschaetzt": bool(row["eol_geschaetzt"]),
+            "uvp_eur": row["uvp_eur"],
+            # Brickmerges Setbilder, ganze Adressen (seit 3.9.12 aus der
+            # Setdatei; das erste ist die Schachtel). Geholt werden sie wie
+            # alle Katalogbilder vom eigenen Server.
+            "bilder": [brickmerge.BILDORDNER + b
+                       for b in _setbilder(_json_liste(row["bilder"]))],
+            # Der deutsche Name aus `set_namen`, sonst leer – die Oberfläche
+            # bleibt dann beim englischen. Die Suche fand „Supersternzerstörer“
+            # schon, der Steckbrief zeigte trotzdem „Executor Super Star
+            # Destroyer“ (10.10.2026).
+            "name_de": _setname_de(row["nr"])}
+
+
+@app.get("/api/brickmerge/{nr}")
+def brickmerge_eines(nr: str, user: dict = Depends(current_user)):
+    """Brickmerges Angebotspreis für den Steckbrief – nur mit Zustimmung.
+
+    **Erscheinung, EOL, UVP und Bilder kommen seit 3.9.12 aus der
+    Setdatei** des Katalogdienstes, der Brickmerge im Takt abfragt („wobei
+    ich gedacht hätte, die setdaten ziehen wir uns selber und diese werden
+    im katalog hinterlegt“, 10.10.2026). Was bleibt, ist der Preis:
+    Der ändert sich stündlich, und er ist ein Schalter je Benutzer. Ohne
+    Zustimmung geht nichts nach draußen; die Antwort trägt dann nur die
+    Adresse.
+    """
+    url = brickmerge.link(nr)
+    if not brickmerge.nummer(nr):
+        raise HTTPException(404, "Kein Set")
+    if core.get_user_setting(user["id"], "brickmerge_preise") != "1":
+        return {"url": url}
+    d = brickmerge.abrufen(nr)
+    aus = {"url": d.get("url") or url}
+    if d.get("ab_eur"):
+        aus["ab_eur"] = d["ab_eur"]
+    return aus
+
+
+def _sets_anreichern(eintraege: list) -> list:
+    """Set-Treffer mit Jahr und Teilezahl aus der Setdatei versehen.
+
+    „Supersternzerstörer“ fand 75457-1 und 75356-1, und LEGO nennt beide
+    „Supersternzerstörer Executor“ – ohne Jahr sahen die Treffer gleich aus
+    (11.10.2026). `sub` wird zu „2026 · 6.130 Teile“.
+    """
+    nrs = [e["item_id"] for e in eintraege
+           if (e.get("item_type") or "") == "set" and e.get("item_id")]
+    if not nrs:
+        return eintraege
+    daten = {}
+    with core.db() as conn:
+        for i in range(0, len(nrs), 500):
+            teil = nrs[i:i + 500]
+            try:
+                for r in conn.execute(
+                        "SELECT nr, jahr, teile FROM set_daten WHERE nr IN (%s)"
+                        % ",".join("?" * len(teil)), teil):
+                    daten[r["nr"]] = (r["jahr"], r["teile"])
+            except sqlite3.Error:
+                return eintraege     # ohne Setdatei bleibt es, wie es war
+    for e in eintraege:
+        jahr, teile = daten.get(e.get("item_id"), (None, None))
+        try:
+            jahr = int(jahr or e.get("year") or 0)
+        except (TypeError, ValueError):
+            jahr = 0
+        teile_n = int(teile) if str(teile or "").isdigit() else 0
+        if (e.get("item_type") or "") != "set" or not (jahr or teile_n):
+            continue
+        teile_txt = ("{:,}".format(teile_n).replace(",", ".") + " Teile"
+                     if teile_n else "")
+        e["year"] = jahr
+        e["sub"] = " · ".join(x for x in (str(jahr) if jahr else "", teile_txt) if x)
+    return eintraege
+
+
+def _setnamen_suchen(begriff: str, hoechstens: int = 20) -> list:
+    """Sets über ihren Namen in anderen Sprachen finden.
+
+    **Wortteile zählen, ab sechs Buchstaben.** Deutsche Setnamen kleben
+    zusammen: „Sternzerstörer" steckt in „Supersternzerstörer Executor",
+    beginnt dort aber kein Wort. Bei kurzen Wörtern bleibt es beim
+    Wortanfang, sonst fände „turm" auch jeden „Sturm".
+    """
+    woerter = _such_woerter(begriff)
+    if not woerter:
+        return []
+    bedingungen, werte = [], []
+    for w in woerter:
+        bedingungen.append("(woerter LIKE ? OR nr LIKE ?)")
+        werte += [("%" if len(w) >= 6 else "% ") + w + "%", w + "%"]
+    with core.db() as conn:
+        rows = conn.execute(
+            "SELECT nr, sprache, name FROM set_namen WHERE "
+            + " AND ".join(bedingungen) + " ORDER BY nr DESC LIMIT ?",
+            werte + [hoechstens * 3]).fetchall()
+    treffer, gesehen = [], set()
+    for row in rows:
+        if row["nr"] in gesehen:
+            continue                 # dasselbe Set in zwei Sprachen
+        gesehen.add(row["nr"])
+        treffer.append({
+            "item_id": row["nr"], "item_type": "set", "name": row["name"],
+            "img_url": "https://cdn.rebrickable.com/media/sets/%s.jpg"
+                       % row["nr"],
+            "sub": "", "year": 0,
+            "bricklink_url": ("https://www.bricklink.com/v2/catalog/"
+                              "catalogitem.page?S=" + row["nr"])})
+        if len(treffer) >= hoechstens:
+            break
+    return treffer
 
 
 def _katalog_namen(grenze: int | None = None) -> dict:
@@ -2699,11 +3447,19 @@ def _katalog_namen(grenze: int | None = None) -> dict:
             if name:
                 with core.db() as conn:
                     conn.execute(
+                        # Mit neuer Zeit, damit gekoppelte Geräte den Namen
+                        # beim nächsten Abgleich bekommen. Bis 3.8.1 holte
+                        # das der nächtliche Abzug nach, weil er jede Zeile
+                        # neu stempelte; seit er Unverändertes in Ruhe lässt,
+                        # käme der Name sonst nie an. Der Strich bei 404
+                        # oben bekommt bewusst keine – er ist kein Name.
                         "UPDATE katalog_index SET name = ?, such = ?, woerter = ?, "
-                        "jahr = ?, category_id = ? WHERE item_no = ?",
+                        "jahr = ?, category_id = ?, updated_at = ?"
+                        " WHERE item_no = ?",
                         (name, _wortanfaenge(name)[0], core.suchwoerter(name),
                          (d.get("year_released") or 0),
-                         str(d.get("category_id") or ""), r["item_no"]))
+                         str(d.get("category_id") or ""), int(time.time()),
+                         r["item_no"]))
                 _namen_lauf["getan"] += 1
             time.sleep(KATALOG_NAMEN_TAKT)
     finally:
@@ -3005,7 +3761,84 @@ def get_price_region(user: dict = Depends(current_user)):
             "suggested": integrations.LAND_WAEHRUNG,
             "pending": pending,
             "missing": missing,
-            "can_fetch": integrations.bricklink_enabled()}
+            "can_fetch": integrations.preise_moeglich()}
+
+
+class PreisabrufBody(BaseModel):
+    stunden: int = Field(ge=1, le=PREISABRUF_MAX)
+
+
+@app.get("/api/settings/preisquelle")
+def get_preisquelle(user: dict = Depends(current_user)):
+    """Woher die Preise kommen und wie viel vom Hub schon da ist.
+
+    Seit 3.9.17 ohne Wahl: Mit eigenem BrickLink-Schlüssel immer BrickLink,
+    ohne immer der Hub (siehe `hubpreise.py`).
+    """
+    return {"quelle": "hub" if hubpreise.an() else "bricklink",
+            "bricklink": integrations.bricklink_enabled(),
+            "abruf_stunden": preisabruf_stunden(),
+            "frisch_stunden": hubpreise.FRISCH_STUNDEN,
+            **hubpreise.status()}
+
+
+@app.post("/api/settings/preisabruf")
+def set_preisabruf(body: PreisabrufBody, user: dict = Depends(admin_user)):
+    """Mit eigenem Schlüssel: alle wie viele Stunden neu geholt wird.
+
+    „wenn jemand seinen eigenen Bricklink-Key eingibt, sollte er selbst
+    entscheiden können wie oft der die Preise abruft“ (15.10.2026).
+    Vorgabe 24 Stunden. Wer viel hat und oft holt, stößt an den Stapel
+    (`PRICE_STAPEL_MAX`) – der schützt das Kontingent.
+    """
+    core.set_setting("preisabruf_stunden", str(body.stunden))
+    return {"ok": True, **get_preisquelle(user)}
+
+
+class GeraetLimitBody(BaseModel):
+    n: int = Field(ge=integrations.GERAET_LIMIT_MIN, le=integrations.GERAET_LIMIT_MAX)
+
+
+@app.get("/api/preisabruf")
+def preisabruf_stand(user: dict = Depends(current_user)):
+    """Statuszeile für Nupplo für Windows: wie viele Preise aktuell sind,
+    wie viele Abrufe heute, wann zuletzt – und das Tageslimit des Geräts
+    (siehe `integrations.kontingent_stand`)."""
+    if not desktop.an():
+        raise HTTPException(404, "Nicht gefunden")
+    grenze = int(time.time()) - _auffrischen_nach_s()
+    aktuell = gesamt = 0
+    with core.db() as conn:
+        for table in PRICE_TABLES:
+            bedingung = ("item_id NOT LIKE 'fig-%' AND item_id NOT LIKE 'manuell-%' "
+                         "AND item_id NOT LIKE 'custom-%'")
+            gesamt += conn.execute(f"SELECT COUNT(*) FROM {table} WHERE {bedingung}").fetchone()[0]
+            aktuell += conn.execute(f"SELECT COUNT(*) FROM {table} WHERE {bedingung} "
+                                    "AND COALESCE(price_updated_at, 0) >= ?", (grenze,)).fetchone()[0]
+    return {"aktuell": aktuell, "gesamt": gesamt,
+            "eigener_schluessel": integrations.bricklink_enabled() and not hubpreise.an(),
+            **integrations.kontingent_stand()}
+
+
+@app.post("/api/preisabruf/limit")
+def preisabruf_limit(body: GeraetLimitBody, user: dict = Depends(admin_user)):
+    """Höchstens so viele BrickLink-Abrufe am Tag auf diesem Gerät."""
+    if not desktop.an():
+        raise HTTPException(404, "Nicht gefunden")
+    core.set_setting("bl_geraet_limit", str(body.n))
+    return preisabruf_stand(user)
+
+
+@app.post("/api/settings/preisquelle/laden")
+def preisquelle_laden(user: dict = Depends(admin_user)):
+    """Abzug von Hand neu holen (höchstens einmal am Tag je Gebiet)."""
+    if not hubpreise.an():
+        raise HTTPException(400, "Preisquelle ist nicht der Hub")
+    try:
+        erg = hubpreise.laden_kette(integrations.price_region(), erzwingen=True)
+    except requests.RequestException:
+        raise HTTPException(502, "Hub nicht erreichbar")
+    return {"ok": True, "geladen": erg, **get_preisquelle(user)}
 
 
 class PriceRegionBody(BaseModel):
@@ -3022,6 +3855,13 @@ def set_price_region(body: PriceRegionBody, user: dict = Depends(admin_user)):
     core.set_setting("price_region", body.region)
     if body.currency is not None:
         core.set_setting("currency", body.currency)
+    if hubpreise.an():
+        # Der Abzug gilt je Gebiet – das neue gleich holen.
+        try:
+            hubpreise.laden_kette(body.region)
+        except Exception as e:
+            print(f"[nupplo] Hub-Preise fürs neue Gebiet übersprungen: {e}",
+                  flush=True)
     waehrung = integrations.currency()
     with core.db() as conn:
         pending = _prices_pending(conn, body.region, waehrung)
@@ -3037,7 +3877,7 @@ def refresh_prices_region(limit: int = 20, user: dict = Depends(admin_user)):
     gebraucht), und BrickLink hat ein Tageskontingent. Die Antwort sagt, wie
     viele noch offen sind – die App ruft so lange nach, wie es sinnvoll ist.
     """
-    if not integrations.bricklink_enabled():
+    if not integrations.preise_moeglich():
         raise HTTPException(501, "BrickLink-API nicht konfiguriert")
     limit = max(1, min(limit, 50))
     region = integrations.price_region()
@@ -3075,7 +3915,7 @@ def refresh_prices_missing(limit: int = 20, user: dict = Depends(admin_user)):
     sich der Lauf nicht endlos an Artikeln, die wirklich nirgends verkauft
     wurden.
     """
-    if not integrations.bricklink_enabled():
+    if not integrations.preise_moeglich():
         raise HTTPException(501, "BrickLink-API nicht konfiguriert")
     limit = max(1, min(limit, 50))
     started = int(time.time())
@@ -3156,6 +3996,9 @@ def request_update(body: UpdateRequestBody, user: dict = Depends(admin_user)):
                                  "Server. Ohne ihn bliebe die App hängen – "
                                  "siehe README (update-watch.sh als Aufgabe "
                                  "einrichten).")
+    # Vor der Markierung: update.sh sichert die Datenbankdatei von außen,
+    # die eines älteren Stands nur `brickfolio.db` ohne `-wal`.
+    core.wal_zusammenfuehren()
     now = int(time.time())
     data = {"requested_at": now, "execute_after": now + body.delay,
             "by": user["name"], "version": core.APP_VERSION}
@@ -3300,6 +4143,35 @@ def set_angebotspreise(body: AngebotspreiseBody,
     return {"ok": True, "an": body.an}
 
 
+@app.post("/api/settings/brickmerge_preise")
+def set_brickmerge_preise(body: AngebotspreiseBody,
+                          user: dict = Depends(current_user)):
+    """Brickmerges Angebotspreis im Steckbrief zeigen – je Benutzer.
+
+    „die angebotspreise von brickmerge sollten, genauso wie die ab-Preise
+    von Bricklink optional sein“ (10.10.2026). Also wie dort:
+    ausgeschaltet voreingestellt, gleich daneben in den Einstellungen.
+    """
+    core.set_user_setting(user["id"], "brickmerge_preise",
+                          "1" if body.an else "0")
+    return {"ok": True, "an": body.an}
+
+
+@app.post("/api/settings/brickmerge_bilder")
+def set_brickmerge_bilder(body: AngebotspreiseBody,
+                          user: dict = Depends(current_user)):
+    """Brickmerges Setbilder im Steckbrief zeigen – je Benutzer.
+
+    „Die Bilder bitte nicht mit ziehen, diese sollen von dort aus geöffnet
+    werden. Aber auch abschaltbar bitte.“ (10.10.2026). Wie der
+    Angebotspreis gleich darüber: ausgeschaltet voreingestellt. Eingeschaltet
+    lädt der Browser die Bilder direkt bei brickmerge.de.
+    """
+    core.set_user_setting(user["id"], "brickmerge_bilder",
+                          "1" if body.an else "0")
+    return {"ok": True, "an": body.an}
+
+
 class SchonendBody(BaseModel):
     schonend: bool
 
@@ -3311,7 +4183,7 @@ def set_schonend(body: SchonendBody, user: dict = Depends(current_user)):
     Er lag bis 2.47.1 allein im `localStorage` – und der gehört zur
     Adresse, nicht zum Gerät. Er war eingeschaltet, und trotzdem
     stürzte der Renderer ab: Die abgestürzte Sitzung lief über
-    `http://192.168.0.199:8300`, die eingeschaltete über HTTPS. Zwei
+    `http://192.168.1.20:8300`, die eingeschaltete über HTTPS. Zwei
     Adressen, zwei Speicher, und niemand sieht es (25.08.2026).
 
     Für eine Einstellung, die Abstürze verhindern soll, ist das der
@@ -3335,14 +4207,20 @@ def _schonend(user: dict):
 
 @app.get("/api/config")
 def config(user: dict = Depends(current_user)):
-    return {"bricklink_prices": integrations.bricklink_enabled(),
+    return {"bricklink_prices": integrations.preise_moeglich(),
             "bricklink_lookup": integrations.bricklink_enabled(),
             "catalog_search": _katalogsuche_moeglich(),
             "schonend": _schonend(user),
             "jedipedia": core.get_user_setting(user["id"],
                                               "jedipedia") == "1",
+            # Angebote („ab“) gibt es nur mit eigenem Schlüssel.
             "angebotspreise": core.get_user_setting(
-                user["id"], "angebotspreise") == "1",
+                user["id"], "angebotspreise") == "1"
+            and integrations.bricklink_enabled(),
+            "brickmerge_preise": core.get_user_setting(
+                user["id"], "brickmerge_preise") == "1",
+            "brickmerge_bilder": core.get_user_setting(
+                user["id"], "brickmerge_bilder") == "1",
             # aus | browser | handy | beide – „handy" gilt für die schmale
             # Ansicht und für andere Oberflächen auf dem Telefon.
             "bauanleitung": core.get_user_setting(
@@ -3359,7 +4237,12 @@ def config(user: dict = Depends(current_user)):
             # Übersetzungsweg an `ki_suche` – ohne Ollama fragte sie gar
             # nicht erst nach, und das Wörterbuch kam nie zum Zug.
             "such_uebersetzung": True,
-            "hub_connected": hub.enabled()}
+            "hub_connected": hub.enabled(),
+            "cmf_teilen": cmf.teilen_an(),
+            # Woher die Preise kommen: Die Oberfläche erklärt Angebotspreise
+            # und Preis-Protokoll je nach Quelle anders.
+            "preisquelle": "hub" if hubpreise.an() else "bricklink",
+            "preisabruf_stunden": preisabruf_stunden()}
 
 
 class BetreiberKontaktBody(BaseModel):
@@ -3400,11 +4283,27 @@ def set_offer_percent(body: OfferPercentBody,
 
 
 @app.get("/api/lookup/{item_type}/{item_no}")
-def bricklink_lookup(item_type: str, item_no: str,
+def bricklink_lookup(item_type: str, item_no: str, frisch: bool = False,
                      user: dict = Depends(current_user)):
-    if not integrations.bricklink_enabled():
-        raise HTTPException(501, "BrickLink-API nicht konfiguriert "
-                                 "(BL_CONSUMER_KEY usw. in docker-compose setzen)")
+    # Der eigene Katalog antwortet zuerst: Figuren aus dem Abzug, Sets aus
+    # der Setdatei. Ohne eigenen BrickLink-Zugang kam hier bis 2.x ein 501,
+    # und der Live-Scanner bekam zu einer längst bekannten Nummer keinen
+    # Namen. Mit Zugang fragte die SE bis 3.9.21 trotzdem zuerst BrickLink
+    # live – iPhone und Mac fragen seit 17.10.2026 in jedem Fall zuerst den
+    # Katalog (Sven: „dass die Daten auch so gezogen werden wie es
+    # eingestellt wurde“), und alle Apps sollen sich gleich verhalten.
+    # BrickLink bleibt Rückfall für Nummern, die der Katalog nicht kennt.
+    # `frisch` kommt nur vom ↻ am Bild: Dort will jemand ausdrücklich das
+    # Bild von BrickLink, und der Katalog hätte nur dasselbe alte geliefert.
+    mit_bl = integrations.bricklink_enabled()
+    if not (frisch and mit_bl):
+        treffer = _lookup_katalog(item_type, item_no.strip())
+        # Ohne Bild hilft der Katalogtreffer dem ↻ nicht – dann BrickLink.
+        if treffer and (treffer["img_url"] or not mit_bl):
+            return treffer
+    if not mit_bl:
+        # Gefragt wurde der eigene Katalog, nicht BrickLink – also auch so sagen.
+        raise HTTPException(404, "Diese Nummer ist im Katalog nicht bekannt.")
 
     def hole(nr: str) -> tuple:
         """(Treffer, Fehler) – „kennt BrickLink nicht" ist beides nicht.
@@ -3448,6 +4347,109 @@ def bricklink_lookup(item_type: str, item_no: str,
     raise HTTPException(404, _unbekannt_meldung(nummer, katalog=True))
 
 
+_TYPEN = ("minifig", "set", "part")
+
+
+def _andere_typen(q: str, item_type: str, je_typ: int = 5) -> list:
+    """Treffer unter den **anderen** Typen, aus den eigenen Daten.
+
+    Wer „Supersternzerstörer“ tippt und Minifigur ausgewählt lässt (die
+    Vorgabe), fand nichts – das Set kam erst nach dem Umstellen auf „Set“
+    (10.10.2026). Rebrickable wird dafür nicht gefragt: Das hier
+    läuft nur, wenn der gewählte Typ leer blieb, und soll nichts kosten.
+    """
+    aus = []
+    for t in _TYPEN:
+        if t == item_type:
+            continue
+        try:
+            if t == "set":
+                treffer = _setnamen_suchen(q, je_typ) + _katalog_suchen(
+                    q, je_typ, "set", genug=je_typ)
+            elif t == "part":
+                # Nur über die Nummer: Die Teilesuche ist breit (Farben,
+                # Wortteile) und lieferte zu „Supersternzerstörer“ einen
+                # bedruckten Stein – als Beifang unter dem Set störte das.
+                treffer = []
+            else:
+                treffer = _katalog_suchen(q, je_typ, "minifig", genug=je_typ)
+        except Exception as e:
+            print(f"[nupplo] Suche unter {t} übersprungen: {e}", flush=True)
+            treffer = []
+        exakt = _nummer_treffer(q, t)
+        if exakt:
+            treffer = [exakt] + treffer
+        gesehen = set()
+        for x in treffer:
+            if x.get("item_id") in gesehen:
+                continue
+            gesehen.add(x.get("item_id"))
+            aus.append(dict(x, item_type=x.get("item_type") or t))
+            if len(gesehen) >= je_typ:
+                break
+    return _sets_anreichern(aus)
+
+
+_NUMMER_MUSTER = re.compile(r"^[a-z]{0,8}\d+[a-z0-9]*(?:-\d+)?$", re.I)
+
+
+def _nummer_treffer(q: str, item_type: str) -> dict | None:
+    """Sieht die Eingabe wie eine Katalognummer aus (sw1422, 75192,
+    75192-1, 3626px34) und steht sie im eigenen Katalog, als Suchtreffer."""
+    nummer = q.strip()
+    if not _NUMMER_MUSTER.match(nummer):
+        return None
+    t = _lookup_katalog(item_type, nummer)
+    if not t and nummer != nummer.lower():
+        t = _lookup_katalog(item_type, nummer.lower())
+    if not t:
+        return None
+    return {"item_id": t["item_id"], "item_type": t["item_type"],
+            "name": t["name"], "img_url": t["img_url"],
+            "sub": t["sub"], "year": t["year"],
+            "bricklink_url": t["bricklink_url"]}
+
+
+def _lookup_katalog(item_type: str, nummer: str) -> dict | None:
+    """Eine Nummer im eigenen Katalog nachschlagen – in derselben Form wie
+    der BrickLink-Abruf, mit `quelle: "katalog"`. Sets auch ohne „-1“."""
+    if not nummer:
+        return None
+    namen = [nummer]
+    if item_type == "set" and "-" not in nummer:
+        namen.append(f"{nummer}-1")
+    marken = ",".join("?" * len(namen))
+    with core.db() as conn:
+        row = conn.execute(
+            f"SELECT item_no, name, img_url, category_id, jahr FROM katalog_index "
+            f"WHERE item_type = ? AND item_no IN ({marken}) "
+            "ORDER BY item_no = ? DESC LIMIT 1",
+            [item_type, *namen, nummer]).fetchone()
+    if not row:
+        return None
+    no = row["item_no"]
+    kuerzel = {"minifig": "M", "set": "S", "part": "P"}.get(item_type, "M")
+    try:
+        jahr = int(row["jahr"] or 0)
+    except (TypeError, ValueError):
+        jahr = 0
+    kat = row["category_id"]
+    return {
+        "item_id": no,
+        "item_type": item_type,
+        "name": row["name"] or no,
+        "img_url": row["img_url"] or "",
+        "alternate_no": "",
+        # „rb:Star Wars“ ist ein Thema aus der Setdatei, keine BrickLink-ID.
+        "category_id": int(kat) if str(kat or "").isdigit() else None,
+        "year": jahr,
+        "sub": str(jahr) if jahr else "",
+        "bricklink_url": ("https://www.bricklink.com/v2/catalog/catalogitem.page?"
+                          f"{kuerzel}={requests.utils.quote(no)}"),
+        "quelle": "katalog",
+    }
+
+
 def _katalogsuche_moeglich() -> bool:
     """Kann diese Instanz überhaupt im Katalog suchen?
 
@@ -3462,8 +4464,22 @@ def _katalogsuche_moeglich() -> bool:
     if integrations.rebrickable_enabled():
         return True
     with core.db() as conn:
+        # Die Setnamen zählen mit: Wer „Polizeistatio" tippt und nichts
+        # trifft, hat „nichts gefunden", nicht „nicht eingerichtet".
         return bool(conn.execute(
-            "SELECT 1 FROM katalog_index LIMIT 1").fetchone())
+            "SELECT 1 FROM katalog_index UNION ALL"
+            " SELECT 1 FROM set_namen LIMIT 1").fetchone()) or \
+            _figurteile_da()
+
+
+def _figurteile_da() -> bool:
+    """Auch die Teile der Figuren machen eine Suche möglich (Einzelteile)."""
+    try:
+        with core.db() as conn:
+            return bool(conn.execute(
+                "SELECT 1 FROM figurteile_teil LIMIT 1").fetchone())
+    except Exception:
+        return False                  # Tabelle gibt es noch nicht
 
 
 @app.get("/api/search")
@@ -3497,6 +4513,34 @@ def catalog_search(q: str = "", item_type: str = "minifig", page: int = 1,
     grenze = SUGGEST_MAX if item_type == "minifig" else 20
     eigene = (_katalog_suchen(q, grenze, item_type, genug=20)
               if page == 1 else [])
+    if item_type == "set" and page == 1:
+        # Sets kennt der eigene Abzug nicht – aber ihre Namen auf Deutsch
+        # (und weiteren Sprachen), wie LEGO sie druckt. Getroffen wird mit
+        # dem Getippten selbst, ohne Übersetzung.
+        eigene = _setnamen_suchen(q) + eigene
+    if item_type == "part" and page == 1:
+        # Die Teile der Figuren, mit Farbe und BrickLinks beschreibendem
+        # Namen – Rebrickable kennt Teile nur farblos und englisch
+        # („weißer Stormtrooper-Helm" fand dort nichts, 10.10.2026).
+        try:
+            eigene = figurteile.suchen(q) + eigene
+        except Exception as e:
+            print(f"[nupplo] Teilesuche übersprungen: {e}", flush=True)
+
+    # **Eine getippte Nummer ist ein exakter Treffer und steht oben.** Die
+    # Suche vergleicht Namen und Farben, keine Nummern – „sw1422“ fand im
+    # manuellen Erfassen nichts, obwohl die Figur im Abzug stand
+    # (10.10.2026). Erst nach Setnamen und Teilen, sonst stünde dasselbe
+    # Set unter deutschem und englischem Namen zweimal da.
+    if page == 1:
+        exakt = _nummer_treffer(q, item_type)
+        if exakt:
+            treffer_da = next((e for e in eigene
+                               if e.get("item_id") == exakt["item_id"]), None)
+            eigene = [treffer_da or exakt] + [
+                e for e in eigene if e.get("item_id") != exakt["item_id"]]
+    if page == 1 and item_type == "set":
+        _sets_anreichern(eigene)
 
     if not integrations.rebrickable_enabled():
         if eigene or _katalogsuche_moeglich():
@@ -3505,9 +4549,12 @@ def catalog_search(q: str = "", item_type: str = "minifig", page: int = 1,
             # „nicht eingerichtet". Der Unterschied ist der zwischen einem
             # Hinweis, der stimmt, und einem, der in die Irre führt
             # (gemeldet am 24.08.2026).
-            return {"items": eigene[:SUGGEST_MAX], "count": len(eigene),
-                    "page": 1, "has_more": False,
-                    "eigene_leer": not eigene}
+            antwort = {"items": eigene[:SUGGEST_MAX], "count": len(eigene),
+                       "page": 1, "has_more": False,
+                       "eigene_leer": not eigene}
+            if not eigene and page == 1:
+                antwort["andere"] = _andere_typen(q, item_type)
+            return antwort
         raise HTTPException(501, "Katalogsuche nicht konfiguriert "
                                  "(REBRICKABLE_KEY in docker-compose setzen)")
     # **Bei Figuren fragt Rebrickable nur, wenn der eigene Abzug leer
@@ -3535,6 +4582,8 @@ def catalog_search(q: str = "", item_type: str = "minifig", page: int = 1,
             # lieferte von dort `Miss Fritter`, und weil das ein Ergebnis
             # ist, wurde `Knight` nie gesucht (28.08.2026).
             fremd["eigene_leer"] = True
+            if not fremd.get("items") and page == 1:
+                fremd["andere"] = _andere_typen(q, item_type)
             return fremd
         # Der eigene zuerst, Rebrickable dahinter – und nichts doppelt.
         gesehen = {(e["item_id"], e["item_type"]) for e in eigene}
@@ -3915,6 +4964,9 @@ def stats_dashboard(user: dict = Depends(current_user)):
         day = d
     if day is not None:
         timeline.append({"ts": day * 86400 + 43200, "value": _snapshot()})
+    # Der Verlauf ist Zugabe zu einem frischen Wert, nie Ersatz dafür.
+    if total_value <= 0:
+        timeline = []
 
     ergebnis = {"totals": {"pieces": pieces,
                        "unique": len(items),
@@ -4251,6 +5303,7 @@ def backup_restore_file(body: RestoreFileBody,
     dst = sqlite3.connect(safety)
     try:
         live.backup(dst)
+        core.als_einzeldatei(dst)
     finally:
         dst.close()
 
@@ -4276,6 +5329,9 @@ def backup_restore_file(body: RestoreFileBody,
     import sync
     with core.db() as conn:
         sync.neues_zeitalter(conn)
+    # Der Kategoriebaum und die Themen sind je Prozess gemerkt; mit der
+    # Datei kann ein anderer Baum zurückgekommen sein.
+    _kategorien_vergessen()
 
     print(f"[nupplo] Wiederhergestellt: {body.name} "
           f"(Sicherheitskopie: {os.path.basename(safety)})", flush=True)
@@ -4405,6 +5461,7 @@ def _sicherung_einspielen(body: "RestoreBody") -> dict:
         import sync
         sync.migrieren(conn)
         sync.neues_zeitalter(conn)
+    _kategorien_vergessen()
     counts["uploads"] = _bilder_zurueckschreiben(body.uploads)
     return counts
 
@@ -4490,7 +5547,7 @@ def _mask(value: str) -> str:
 
 
 def _config_flags() -> dict:
-    return {"bricklink_prices": integrations.bricklink_enabled(),
+    return {"bricklink_prices": integrations.preise_moeglich(),
             "bricklink_lookup": integrations.bricklink_enabled(),
             "catalog_search": _katalogsuche_moeglich()}
 
@@ -5224,6 +6281,18 @@ def test_settings(user: dict = Depends(admin_user)):
             results["rebrickable"] = {"ok": False, "info": fehlertext(e)}
     else:
         results["rebrickable"] = {"ok": False, "info": "Kein Schlüssel hinterlegt"}
+    # Den Preisdienst nur melden, wenn er gewählt ist. Wer mit eigenem
+    # Schlüssel arbeitet, soll beim Test kein rotes Kreuz für einen Dienst
+    # sehen, den er gar nicht nutzt.
+    if hubpreise.an():
+        st = hubpreise.status()
+        results["preisdienst"] = (
+            {"ok": True, "info": f"{st['saetze']} Preise geladen",
+             # Die Zahl einzeln, damit die Oberfläche den Satz übersetzen
+             # kann – fertig mit Zahl findet ihn kein Wörterbuch.
+             "anzahl": st["saetze"]}
+            if st["saetze"] else
+            {"ok": False, "info": "Noch keine Preise geladen"})
     return results
 
 
@@ -5459,8 +6528,15 @@ def fig_sets(fig_no: str, user: dict = Depends(current_user)):
     """Alle Sets, in denen diese Figur vorkommt (BrickLink-Supersets) – auch
     solche, die man selbst nicht besitzt. Ohne BrickLink-Nummer oder -Schlüssel
     gibt es nichts zu holen."""
-    if fig_no.startswith(("fig-", "manuell-", "custom-")) \
-            or not integrations.bricklink_enabled():
+    if fig_no.startswith(("fig-", "manuell-", "custom-")):
+        return {"sets": []}
+    # Zuerst die Teiledatei des Katalogdienstes (13.10.2026): kein BrickLink-
+    # Abruf, und sie kennt auch ganz neue Figuren, die BrickLink noch keinem
+    # Set zugeordnet hat. Im Wirkbetrieb wollen wir von der API weg.
+    aus_datei = figurteile.sets_aus_datei(fig_no)
+    if aus_datei:
+        return {"sets": aus_datei}
+    if not integrations.bricklink_enabled():
         return {"sets": []}
     try:
         return {"sets": _fig_sets_cached(fig_no)}
@@ -5493,6 +6569,11 @@ def _fig_parts_cached(fig_no: str) -> list:
 def fig_parts(fig_no: str, user: dict = Depends(current_user)):
     """Aus welchen Teilen besteht diese Minifigur? (BrickLink-Subsets,
     30-Tage-Cache). Ohne BrickLink-Nummer oder -Schlüssel gibt es nichts."""
+    # Zuerst die Teiledatei (3.9.0): Sie kostet kein BrickLink und geht
+    # auch ohne Schlüssel.
+    d = figurteile.aus_datei(fig_no)
+    if d is not None:
+        return {"items": d["teile"]}
     if fig_no.startswith(("fig-", "manuell-", "custom-")) \
             or not integrations.bricklink_enabled():
         return {"items": []}
@@ -5666,12 +6747,18 @@ def _scan_kontingent() -> None:
 
 @app.post("/api/scan")
 def scan(file: UploadFile = File(...), user: dict = Depends(current_user)):
-    _scan_kontingent()
     raw = file.file.read()
     if not raw:
         raise HTTPException(400, "Kein Bild empfangen")
     if len(raw) > 25 * 1024 * 1024:
         raise HTTPException(413, "Bild zu groß (max. 25 MB)")
+    # Sammelfiguren-Schachtel? Der Data-Matrix-Code verrät die Figur – dann
+    # geht das Foto gar nicht erst zu Brickognize (siehe cmf.py) und zählt
+    # auch nicht gegen dessen Bremse.
+    gelesen = cmf.lesen(raw)
+    if gelesen:
+        return _schachtel_antwort(cmf.nachschlagen(gelesen[0]), gelesen[1])
+    _scan_kontingent()
     try:
         result = integrations.recognize(raw)
     except requests.Timeout:
@@ -5681,6 +6768,67 @@ def scan(file: UploadFile = File(...), user: dict = Depends(current_user)):
     except Exception:
         raise HTTPException(400, "Bild konnte nicht verarbeitet werden")
     return result
+
+
+def _schachtel_antwort(fund: dict, roh: str = "") -> dict:
+    """Antwort auf einen gelesenen Schachtel-Code, im Format von `/api/scan`.
+
+    Unbekannt heißt: keine Treffer, und die Oberfläche bietet das Anlernen
+    an. Das Foto geht auch dann nicht zu Brickognize – auf der Schachtel ist
+    keine Figur zu sehen, nur ihr Code.
+    """
+    schachtel = {"code": fund["code"], "roh": roh,
+                 "bekannt": bool(fund["item_no"]),
+                 "quelle": fund["quelle"],
+                 "liste_fehlt": bool(fund.get("liste_fehlt"))}
+    items = [cmf.treffer(fund["item_no"])] if fund["item_no"] else []
+    return {"items": items, "schachtel": schachtel}
+
+
+class SchachtelBody(BaseModel):
+    code: str = Field(min_length=6, max_length=200)
+    roh: str = Field(default="", max_length=200)
+
+
+@app.post("/api/cmf/nachschlagen")
+def cmf_nachschlagen(body: SchachtelBody, user: dict = Depends(current_user)):
+    """Einen schon gelesenen Code erneut nachschlagen – mit frisch geholter
+    Liste. Für „Code-Liste wird geladen …“, ohne die Schachtel neu zu
+    fotografieren."""
+    code = cmf.schluessel(body.code)
+    if not code:
+        raise HTTPException(400, "Kein gültiger Schachtel-Code")
+    return _schachtel_antwort(cmf.nachschlagen(code, erzwingen=True), body.roh)
+
+
+class SchachtelLernenBody(SchachtelBody):
+    item_no: str = Field(min_length=4, max_length=20)
+
+
+@app.post("/api/cmf/lernen")
+def cmf_lernen(body: SchachtelLernenBody, user: dict = Depends(current_user)):
+    """Eine unbekannte Schachtel anlernen: Code → Sammelfigur (nur col…)."""
+    try:
+        r = cmf.lernen(body.code, body.item_no, body.roh)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return {**r, "items": [cmf.treffer(r["item_no"])]}
+
+
+class CmfTeilenBody(BaseModel):
+    an: bool
+
+
+@app.post("/api/settings/cmf_teilen")
+def set_cmf_teilen(body: CmfTeilenBody, user: dict = Depends(admin_user)):
+    """„Gelernte Schachtel-Codes teilen“ – für die ganze Instanz.
+
+    Ausgeschaltet voreingestellt, wie in der iOS-App: „später auf die teilen
+    (natürlich nur mit Zustimmung)“ (Sven). Eingeschaltet geht beim Anlernen
+    nur Code und Figurnummer an den Hub, ohne Namen.
+    """
+    core.set_setting("cmf_teilen", "1" if body.an else "0")
+    return {"ok": True, "an": body.an}
 
 
 # ------------------------------------------------- Eigene Bilder (Custom)
@@ -5742,6 +6890,18 @@ def _katalog_name(url: str) -> str:
     return hashlib.sha256(roh).hexdigest() + ".jpg"
 
 
+def _temp_name(pfad: str, endung: str) -> str:
+    """Zwischendatei für einen Abruf – je Faden eine eigene.
+
+    Bis 3.8.1 trug sie nur die Prozessnummer. Holten zwei Fäden desselben
+    Prozesses dasselbe Bild – `/catalog` und der Hintergrundabruf beim
+    Erfassen, oder dieselbe Figur zweimal auf einer Seite –, schrieben beide
+    in dieselbe Datei. Der zweite `os.replace` fand sie nicht mehr, und
+    diese Anfrage bekam den Platzhalter statt des Bildes.
+    """
+    return f"{pfad}.{os.getpid()}.{threading.get_ident()}.{endung}"
+
+
 def _katalog_bild(url: str, holen: bool = True) -> str | None:
     """Lokaler Pfad zum Bild – bei Bedarf wird es einmal geholt.
 
@@ -5779,7 +6939,7 @@ def _katalog_bild(url: str, holen: bool = True) -> str | None:
         return None
     # Erst vollständig schreiben, dann umbenennen: Ein abgebrochener Abruf
     # hinterlässt sonst eine halbe Datei, die für immer als „fertig" gilt.
-    temp = pfad + f".{os.getpid()}.part"
+    temp = _temp_name(pfad, "part")
     try:
         with open(temp, "wb") as f:
             f.write(klein)
@@ -5830,7 +6990,7 @@ def _daumennagel(pfad: str, kante: int) -> str | None:
     try:
         with open(pfad, "rb") as f:
             klein = integrations.prepare_image(f.read(), max_side=kante)
-        temp = ziel + f".{os.getpid()}.part"
+        temp = _temp_name(ziel, "part")
         with open(temp, "wb") as f:
             f.write(klein)
         os.replace(temp, ziel)
@@ -5902,7 +7062,7 @@ def _bild_ersetzen(url: str, pfad: str) -> bool:
         # Erst vollständig schreiben, dann umbenennen: Ein abgebrochener
         # Abruf hinterlässt sonst eine halbe Datei, die für immer als
         # „fertig" gilt.
-        temp = pfad + f".{os.getpid()}.neu"
+        temp = _temp_name(pfad, "neu")
         with open(temp, "wb") as f:
             f.write(gross)
         os.replace(temp, pfad)
@@ -5924,8 +7084,86 @@ def _bild_ersetzen(url: str, pfad: str) -> bool:
         return False
 
 
+# Höchstens so viele Bilder gleichzeitig von draußen holen. Bis 3.8.1 gab es
+# keine Grenze: Eine Seite mit 60 neuen Figuren schickte 60 Abrufe los, jeder
+# bis zu 41 s (zwei Versuche à 20 s), und die belegten alle 40 Plätze des
+# Threadpools – jede andere Anfrage der Instanz wartete mit. Jetzt warten die
+# übrigen in der Ereignisschleife, wo Warten nichts kostet.
+_bild_abrufe = asyncio.Semaphore(4)
+
+# Bild-Rückfall auf Rebrickable (21.11.2026, Sven, BrickLink wieder
+# ausgefallen): Wann BrickLink zuletzt kein Figurenbild lieferte – zehn
+# Minuten lang geht es danach gleich zu Rebrickable, sonst hinge jedes Bild
+# erst an BrickLink.
+_bricklink_still = 0.0
+_bl_rb_tabelle: dict = {}
+
+
+def _bricklink_figur(url: str) -> str | None:
+    """Die Figurnummer aus einer BrickLink-Bildadresse
+    (`/ItemImage/MN/0/sw0001a.png`, `/M/sw0001a.gif`, `/ML/Sw0810.jpg`),
+    klein geschrieben."""
+    p = urllib.parse.urlparse(url if not url.startswith("//") else "https:" + url)
+    if p.hostname != "img.bricklink.com":
+        return None
+    teile = [t for t in p.path.split("/") if t]
+    if len(teile) >= 4 and teile[0] == "ItemImage" and teile[1] in ("MN", "ML"):
+        datei = teile[-1]
+    elif len(teile) >= 2 and teile[0] in ("M", "ML", "MN"):
+        datei = teile[-1]
+    else:
+        return None
+    nr = datei.rsplit(".", 1)[0].lower()
+    return nr or None
+
+
+def _bricklink_set(url: str) -> str | None:
+    """Die Setnummer aus `/ItemImage/SN/0/75192-1.png`, klein geschrieben."""
+    p = urllib.parse.urlparse(url if not url.startswith("//") else "https:" + url)
+    teile = [t for t in p.path.split("/") if t]
+    # Auch die alte Form `/SL/75222-1.jpg` älterer Einträge (23.11.2026).
+    if p.hostname != "img.bricklink.com" or not (
+            len(teile) >= 4 and teile[:2] == ["ItemImage", "SN"] or len(teile) >= 2 and teile[0] in ("SL", "S")):
+        return None
+    return teile[-1].rsplit(".", 1)[0].lower() or None
+
+
+def _rebrickable_ersatz(url: str) -> str | None:
+    """Ersatzbild, wenn BrickLink keins liefert: Figuren von Rebrickable laut
+    Teiledatei (Feld `rb`), Sets von Rebrickable unter derselben Nummer,
+    Teile gar nicht. Nur eindeutige Rebrickable-Nummern: Teilen sich mehrere
+    BrickLink-Figuren eine, stünde sonst dasselbe Bild bei verschiedenen
+    Figuren – dann wie ohne Nummer das Vorschaubild von Brickognize."""
+    global _bl_rb_tabelle
+    set_nr = _bricklink_set(url)
+    if set_nr:
+        return f"https://cdn.rebrickable.com/media/sets/{set_nr}.jpg"
+    nr = _bricklink_figur(url)
+    if not nr:
+        return None
+    if not _bl_rb_tabelle:
+        paare: dict = {}
+        with core.db() as conn:
+            try:
+                rows = conn.execute("SELECT item_no, rb FROM figurteile"
+                                    " WHERE rb LIKE 'fig-%'").fetchall()
+            except Exception:
+                rows = []
+        for r in rows:
+            paare.setdefault(r["rb"], []).append(r["item_no"].lower())
+        _bl_rb_tabelle = {nos[0]: rb for rb, nos in paare.items() if len(nos) == 1}
+    rb = _bl_rb_tabelle.get(nr)
+    if rb:
+        return f"https://cdn.rebrickable.com/media/sets/{rb}.jpg"
+    # Ohne (eindeutige) Rebrickable-Nummer das Vorschaubild von Brickognize –
+    # das gibt es je BrickLink-Nummer, auch für neue Figuren (wie iOS d5ab335).
+    if re.fullmatch(r"[a-z]{2,4}[0-9]{3,4}[a-z]?", nr):
+        return f"https://storage.googleapis.com/brickognize-static/thumbnails/v2.22/fig/{nr}/0.webp"
+    return None
+
+
 @app.get("/catalog")
-def serve_katalogbild(u: str, s: int = 0):
+async def serve_katalogbild(u: str, s: int = 0):
     """Katalogbild ausliefern – aus dem eigenen Speicher.
 
     Die Oberfläche schickt jedes fremde Bild hierüber. Liegt es schon da, geht
@@ -5936,20 +7174,48 @@ def serve_katalogbild(u: str, s: int = 0):
     erreicht, ist ohnehin angemeldet. Geholt werden kann nur von den vier
     festen Katalog-Hosts – als Weg nach außen taugt das nicht.
     """
-    pfad = _katalog_bild(u)
+    # Der häufige Fall – das Bild liegt schon da – ist ein Blick ins
+    # Dateisystem und braucht keinen Faden.
+    global _bricklink_still
+    pfad = _katalog_bild(u, holen=False)
+    ersatz = None
+    if not pfad and time.time() - _bricklink_still < 600:
+        # BrickLink ist gerade still – gleich das Rebrickable-Bild.
+        ersatz = await run_in_threadpool(_rebrickable_ersatz, u)
+    if not pfad and not ersatz:
+        async with _bild_abrufe:
+            pfad = await run_in_threadpool(_katalog_bild, u)
+        if not pfad:
+            ersatz = await run_in_threadpool(_rebrickable_ersatz, u)
+            if ersatz:
+                _bricklink_still = time.time()
+    if not pfad and ersatz:
+        # Das Rebrickable-Bild liegt unter seiner eigenen Adresse; das
+        # BrickLink-Bild wird wieder geholt, sobald BrickLink liefert.
+        pfad = _katalog_bild(ersatz, holen=False)
+        if not pfad:
+            async with _bild_abrufe:
+                pfad = await run_in_threadpool(_katalog_bild, ersatz)
+        if pfad:
+            u = ersatz
+        else:
+            ersatz = None
     if not pfad:
         # Kein Bild – die Oberfläche setzt daraufhin ihren Platzhalter. Kein
         # Verweis auf die Originaladresse: Das wäre genau der Abruf nach
         # außen, den dieser Endpunkt vermeiden soll.
         raise HTTPException(404, "Bild nicht verfügbar")
     if s:
-        pfad = _daumennagel(pfad, s) or pfad
+        pfad = await run_in_threadpool(_daumennagel, pfad, s) or pfad
     else:
         # Das volle Bild fragt nur das Detail-Popup an. Genau dort lohnt es,
         # ein zu klein abgelegtes einmal nachzuholen.
         _bild_nachschaerfen(u, pfad)
+    # Ein Ersatzbild nur kurz im Browser halten: Er merkt es sich unter der
+    # BrickLink-Adresse und fragte sonst ein Jahr lang nicht wieder nach.
+    dauer = "max-age=600" if ersatz else "public, max-age=31536000"
     return FileResponse(pfad, media_type="image/jpeg",
-                        headers={"Cache-Control": "public, max-age=31536000"})
+                        headers={"Cache-Control": dauer})
 
 
 # Was noch kein Bild auf der Instanz hat. Gezählt wird über alle drei
@@ -6550,8 +7816,12 @@ def get_collection(q: str = "", sort: str = "added", item_type: str = "",
         roh = (q.strip().replace("\\", "\\\\").replace("%", "\\%")
                .replace("_", "\\_"))
         like = f"%{roh}%"
-        where.append("(c.name LIKE ? ESCAPE '\\' OR c.item_id LIKE ? ESCAPE '\\')")
-        params_list += [like, like]
+        # Auch der deutsche Setname zählt – angezeigt wird er ja auch.
+        where.append("(c.name LIKE ? ESCAPE '\\' OR c.item_id LIKE ? ESCAPE '\\'"
+                     " OR EXISTS (SELECT 1 FROM set_namen sn WHERE"
+                     " sn.nr = c.item_id AND sn.sprache = 'de'"
+                     " AND sn.name LIKE ? ESCAPE '\\'))")
+        params_list += [like, like, like]
     if item_type in ("minifig", "part", "set"):
         where.append("c.item_type = ?")
         params_list.append(item_type)
@@ -6683,7 +7953,7 @@ def get_collection(q: str = "", sort: str = "added", item_type: str = "",
                 or ((d["item_type"] or "").lower() == "set"
                     and not str(d["item_id"]).startswith(("fig-", "manuell-"))))
             items.append(d)
-    return {"items": items, "stats": stats}
+    return {"items": _namen_de_anhaengen(items), "stats": stats}
 
 
 # Wie viele Zeilen ein Vorschlag höchstens zurückgibt. „Ritter" kann über die
@@ -7405,14 +8675,22 @@ def get_wanted(user: dict = Depends(current_user)):
             "COALESCE(SUM(COALESCE(price_used, price_new)), 0) AS est_cost, "
             "COALESCE(SUM(COALESCE(price_new, price_used)), 0) AS est_cost_new "
             "FROM wanted").fetchone()
+        # „Im Bau x/y" (3.9.0): Wer schon Teile abgehakt hat, sieht, wie
+        # viele es insgesamt sind.
+        im_bau = [r["item_id"] for r in rows if r["teile_da"]]
+        gesamt = figurteile.anzahl_teile(conn, im_bau)
     items = []
     for r in rows:
         d = dict(r)
         e = auf_listen.get((d["item_id"], d["item_type"]))
         d["on_lists"] = e["names"] if e else []
         d["on_lists_qty"] = e["qty"] if e else 0
+        d["teile_da"] = figurteile.haken_lesen(d.get("teile_da"))
+        d["im_bau"] = ({"da": len(d["teile_da"]),
+                        "gesamt": gesamt.get(d["item_id"], 0)}
+                       if d["teile_da"] else None)
         items.append(d)
-    return {"items": items, "stats": dict(stats)}
+    return {"items": _namen_de_anhaengen(items), "stats": dict(stats)}
 
 
 def _wuensche_geaendert() -> None:
@@ -7496,7 +8774,7 @@ def update_wanted(wanted_id: int, body: WantedUpdateBody,
 
 @app.post("/api/wanted/{wanted_id}/refresh_prices")
 def refresh_wanted_prices(wanted_id: int, user: dict = Depends(current_user)):
-    if not integrations.bricklink_enabled():
+    if not integrations.preise_moeglich():
         raise HTTPException(501, "BrickLink-API nicht konfiguriert")
     with core.db() as conn:
         row = conn.execute("SELECT * FROM wanted WHERE id = ?",
@@ -7646,26 +8924,409 @@ def _maybe_fetch_theme_async(item_id: str, item_type: str):
 
 @app.get("/api/set_figs/{set_no}")
 def get_set_figs(set_no: str, user: dict = Depends(current_user)):
-    """Welche Minifiguren stecken in diesem Set?"""
+    """Welche Minifiguren stecken in diesem Set – und welche gibt es nur
+    hier (`exklusiv`)?"""
+    d = _set_figs(set_no)
+    _exklusiv_markieren(set_no, d.get("items") or [])
+    return d
+
+
+# Figur → Basisnummern der Sets, in denen sie steckt. Neu gebaut, sobald
+# sich Setdatei oder Teiledatei ändern (`marke`); 45.000 Zeilen einmal je
+# Nacht zu zählen kostet weniger als jede Abfrage einzeln.
+_exklusiv_stand: dict = {"marke": None, "index": {}}
+
+
+def _exklusiv_index() -> dict:
+    """**Nach BrickLink-Nummer zählen, wo es eine eindeutige gibt.** Die
+    gezeigten Inhalte kommen oft von BrickLink oder aus `set_contents` und
+    tragen deren Nummern; nach Rebrickable gezählt fände die Markierung sie
+    nicht. Ohne eindeutige Abbildung bleibt die Rebrickable-Nummer – die
+    steht dann auch in der Liste. Gezählt wird die **Basisnummer**
+    des Sets: 75192-1 und eine Neuauflage 75192-2 sind dasselbe Set.
+    """
+    with core.db() as conn:
+        try:
+            teile = tuple(conn.execute("SELECT COUNT(*), MAX(rowid) FROM"
+                                       " figurteile").fetchone())
+        except Exception:
+            teile = ()            # Teiledatei noch nie geholt
+        marke = (tuple(conn.execute("SELECT COUNT(*), MAX(rowid) FROM"
+                                    " set_daten").fetchone()), teile)
+        if marke == _exklusiv_stand["marke"]:
+            return _exklusiv_stand["index"]
+        zeilen = conn.execute("SELECT nr, figuren FROM set_daten WHERE"
+                              " figuren != '[]'").fetchall()
+    abbildung = _rb_auf_bl()
+    index: dict = {}
+    for r in zeilen:
+        try:
+            figuren = json.loads(r["figuren"] or "[]")
+        except ValueError:
+            continue
+        basis = r["nr"].split("-")[0]
+        for rb, _ in figuren:
+            index.setdefault(abbildung.get(rb, rb), set()).add(basis)
+    _exklusiv_stand.update(marke=marke, index=index)
+    return index
+
+
+def _exklusiv_markieren(set_no: str, figs: list) -> None:
+    """„eine "exclusiv" markierung …, wenn die Figur nur in diesem Set
+    vorhanden ist“ (10.10.2026). Markiert wird nur, was die Setdatei
+    in genau diesem Set kennt – eine Figur, von der sie nichts weiß, ist
+    unbekannt, nicht exklusiv."""
+    if not figs:
+        return
+    index = _exklusiv_index()
+    basis = set_no.split("-")[0]
+    for f in figs:
+        if index.get(f.get("item_id")) == {basis}:
+            f["exklusiv"] = True
+
+
+def _set_figs(set_no: str) -> dict:
     # Eigene/manuelle Sets kennt BrickLink nicht – gar nicht erst anfragen.
     if set_no.startswith(("custom-", "manuell-")):
         return {"items": []}
+    # Ohne eigenen BrickLink-Zugang (der Normalfall seit dem Preisdienst)
+    # zählt, was schon gespeichert ist: Beim Erfassen eines Sets und aus
+    # Sicherungen kommt der Inhalt mit. Vorher antwortete der Knopf hier mit
+    # 501, obwohl die Figuren längst in `set_contents` standen.
+    lokal = _set_contents_lokal(set_no)
+    # Ein **leerer** gespeicherter Inhalt ist kein Beleg: BrickLink führt
+    # die Figuren neuer Sets oft erst Wochen nach dem Erscheinen (75455-1
+    # stand im August ohne sw1538 da). Also nur ein gefüllter Inhalt zählt.
+    katalog = _set_figs_katalog(set_no)
     if not integrations.bricklink_enabled():
-        raise HTTPException(501, "BrickLink-API nicht konfiguriert "
-                                 "(Schlüssel unter Mehr → API-Schlüssel eintragen)")
+        if lokal and not _katalog_kennt_mehr(katalog, lokal):
+            return {"items": lokal, "quelle": "lokal"}
+        if katalog is not None:
+            return _katalog_antwort(set_no, katalog)
+        if lokal:
+            return {"items": lokal, "quelle": "lokal"}
+        return {"items": [], "quelle": "", "unbekannt": True}
     try:
         figs = integrations.bricklink_subsets(set_no)
+        # BrickLink führt neue Sets oft erst Wochen später mit Figuren
+        # (75455-1 ohne Boba Fett, 10.10.2026). Weiß der Katalog mehr,
+        # gilt der.
+        if _katalog_kennt_mehr(katalog, figs):
+            return _katalog_antwort(set_no, katalog)
         _store_set_contents(set_no, figs)
-        return {"items": figs}
+        return {"items": figs, "quelle": "bricklink"}
     except LookupError as e:
+        if katalog is not None:
+            return _katalog_antwort(set_no, katalog)
         raise HTTPException(404, str(e))
-    except requests.Timeout:
-        raise HTTPException(504, "BrickLink antwortet nicht")
-    except requests.HTTPError as e:
-        code = e.response.status_code if e.response is not None else 0
-        raise HTTPException(502, f"BrickLink-Fehler ({code})")
-    except requests.RequestException:
+    except requests.RequestException as e:
+        # BrickLink gestört: lieber den gespeicherten Stand als gar nichts.
+        if lokal and not _katalog_kennt_mehr(katalog, lokal):
+            return {"items": lokal, "quelle": "lokal"}
+        if katalog is not None:
+            return _katalog_antwort(set_no, katalog)
+        if lokal:
+            return {"items": lokal, "quelle": "lokal"}
+        if isinstance(e, requests.Timeout):
+            raise HTTPException(504, "BrickLink antwortet nicht")
+        if isinstance(e, requests.HTTPError):
+            code = e.response.status_code if e.response is not None else 0
+            raise HTTPException(502, f"BrickLink-Fehler ({code})")
         raise HTTPException(502, "BrickLink nicht erreichbar")
+
+
+def _set_contents_lokal(set_no: str) -> list | None:
+    """Gespeicherter Inhalt eines Sets – None, wenn er nie geholt wurde,
+    eine leere Liste, wenn er leer geholt wurde. BrickLink-Nummern ohne Variante stehen mit „-1“ da, deshalb beide.
+    """
+    namen = [set_no] if "-" in set_no else [set_no, f"{set_no}-1"]
+    marken = ",".join("?" * len(namen))
+    with core.db() as conn:
+        rows = conn.execute(
+            f"SELECT set_no, fig_no, qty, name, img_url FROM set_contents "
+            f"WHERE set_no IN ({marken}) ORDER BY rowid", namen).fetchall()
+        if not rows and not conn.execute(
+                f"SELECT 1 FROM set_meta WHERE set_no IN ({marken})",
+                namen).fetchone():
+            return None
+    out = []
+    for r in rows:
+        no = r["fig_no"]
+        safe = requests.utils.quote(no)
+        out.append({
+            "item_id": no, "item_type": "minifig",
+            "name": r["name"] or no, "qty": r["qty"] or 1,
+            "img_url": r["img_url"]
+            or f"https://img.bricklink.com/ItemImage/MN/0/{safe}.png",
+            "bricklink_url": ("https://www.bricklink.com/v2/catalog/"
+                              f"catalogitem.page?M={safe}"),
+        })
+    return out
+
+
+def _rb_auf_bl() -> dict:
+    """Rebrickable-Figur → BrickLink-Nummer, aus der Teiledatei (3.9.0).
+
+    Nur eindeutige: Tragen zwei BrickLink-Figuren dasselbe Gegenstück –
+    Varianten, die sich nur im Aufdruck auf der Rückseite unterscheiden –,
+    wäre jede Wahl geraten. Dann bleibt die Rebrickable-Nummer stehen.
+    """
+    paare = {}
+    with core.db() as conn:
+        try:
+            rows = conn.execute("SELECT item_no, rb FROM figurteile"
+                                " WHERE rb != ''").fetchall()
+        except Exception:
+            return {}
+    for r in rows:
+        paare.setdefault(r["rb"], []).append(r["item_no"])
+    eindeutig = {rb: nos[0] for rb, nos in paare.items() if len(nos) == 1}
+    # Die Datei schreibt Nummern klein (seit KD 1.22.3); gespeichert wird in
+    # der Schreibweise des Katalogs, sonst passte „LLP002" in der Sammlung
+    # nicht zu „llp002" im Setinhalt.
+    if eindeutig:
+        with core.db() as conn:
+            try:
+                schreib = {r[0].lower(): r[0] for r in conn.execute(
+                    "SELECT item_no FROM katalog_index WHERE item_type = 'minifig'")}
+            except Exception:
+                schreib = {}
+        eindeutig = {rb: schreib.get(no.lower(), no) for rb, no in eindeutig.items()}
+    return eindeutig
+
+
+def _set_figs_katalog(set_no: str, abbildung: dict | None = None):
+    """Die Figuren eines Sets aus der Setdatei (Rebrickable, 3.9.3).
+
+    None heißt: Die Datei kennt das Set nicht. Eine leere Liste heißt: Sie
+    kennt es, und es hat keine Figuren – das ist eine Antwort.
+
+    Anlass: Ohne eigenen BrickLink-Zugang blieb „Enthaltene Figuren“ bei
+    jedem Set leer, dessen Inhalt nicht schon gespeichert war (10.10.2026).
+    Rebrickable führt die Figuren unter eigenen Nummern; über die
+    Teiledatei werden daraus BrickLink-Nummern, sonst bleibt `fig-…` stehen
+    und die Zeile zeigt Rebrickables Namen und Bild.
+    """
+    row = _setdaten(set_no)
+    if row is None:
+        return None
+    try:
+        figuren = json.loads(row["figuren"] or "[]")
+    except ValueError:
+        figuren = []
+    if not figuren:
+        return []
+    if abbildung is None:
+        abbildung = _rb_auf_bl()
+    with core.db() as conn:
+        namen = {r["fig"]: r["name"] for r in conn.execute(
+            "SELECT fig, name FROM set_daten_fig WHERE fig IN (%s)"
+            % ",".join("?" * len(figuren)), [f for f, _ in figuren])}
+        bl_namen = {}
+        bl = [abbildung[f] for f, _ in figuren if f in abbildung]
+        if bl:
+            bl_namen = {r["item_no"]: r["name"] for r in conn.execute(
+                "SELECT item_no, name FROM katalog_index WHERE item_type ="
+                " 'minifig' AND item_no IN (%s)" % ",".join("?" * len(bl)), bl)}
+    out = []
+    for rb, n in figuren:
+        no = abbildung.get(rb)
+        if no:
+            safe = requests.utils.quote(no)
+            out.append({
+                "item_id": no, "item_type": "minifig",
+                "name": bl_namen.get(no) or namen.get(rb) or no,
+                "qty": int(n) or 1,
+                "img_url": f"https://img.bricklink.com/ItemImage/MN/0/{safe}.png",
+                "bricklink_url": ("https://www.bricklink.com/v2/catalog/"
+                                  f"catalogitem.page?M={safe}")})
+        else:
+            out.append({
+                "item_id": rb, "item_type": "minifig",
+                "name": namen.get(rb) or rb, "qty": int(n) or 1,
+                "img_url": f"https://cdn.rebrickable.com/media/sets/{rb}.jpg",
+                "bricklink_url": "", "rebrickable": True})
+    return out
+
+
+def _katalog_kennt_mehr(katalog, figs) -> bool:
+    """Hat die Setdatei mehr Figuren als BrickLink oder der gespeicherte
+    Stand? Dann ist der andere unvollständig, nicht der Katalog."""
+    if not katalog:
+        return False
+    return (sum(f.get("qty", 1) for f in katalog)
+            > sum(f.get("qty", 1) for f in (figs or [])))
+
+
+def _katalog_antwort(set_no: str, katalog: list) -> dict:
+    """Antwort aus der Setdatei – und speichern, **wenn alles abgebildet ist**.
+
+    Eine `fig-…`-Nummer in `set_contents` brächte „👥 3/4“, die Fehlliste
+    und die Rückfrage beim Löschen durcheinander: Die rechnen mit
+    BrickLink-Nummern der Sammlung. Fehlt eine Abbildung, wird der Inhalt
+    nur gezeigt.
+    """
+    if katalog and not any(f.get("rebrickable") for f in katalog):
+
+        _store_set_contents(set_no, katalog)
+    return {"items": katalog, "quelle": "katalog"}
+
+
+def _inhalt_ergaenzen(nr: str, figs: list) -> None:
+    """Einen gespeicherten Set-Inhalt im Hintergrund ergänzen – und merken,
+    welche Figuren neu dazukamen.
+
+    **Nicht still.** „wenn man ein set schon in der Sammlung hat und eine
+    Figur dazu kommt, sollte die App fragen, ob diese in die Sammlung
+    hinzugefügt werden soll“ (10.10.2026). Beim Erfassen eines Sets
+    fragt die App das schon; ein Inhalt, der erst Wochen später vollständig
+    wird (75455-1), entging dieser Frage bisher ganz. Gefragt wird nur, wenn
+    es vorher einen gespeicherten Inhalt gab.
+    """
+    vorher = _set_contents_lokal(nr)
+    _store_set_contents(nr, figs)
+    # Nie geholt heißt nicht „Figuren kamen dazu“: Auf einer frischen
+    # Installation mit übernommener Sammlung (Windows, 23.11.2026) fragte
+    # die App sonst beim ersten Start jedes Set einzeln nach.
+    if vorher is None:
+        return
+    alt = {f["item_id"]: f.get("qty", 1) for f in vorher}
+    jetzt = int(time.time())
+    with core.db() as conn:
+        for f in figs:
+            mehr = f.get("qty", 1) - alt.get(f["item_id"], 0)
+            if mehr > 0 and not str(f["item_id"]).startswith("fig-"):
+                conn.execute(
+                    "INSERT OR REPLACE INTO set_neue_figuren (set_no, fig_no,"
+                    " qty, name, img_url, seit) VALUES (?, ?, ?, ?, ?, ?)",
+                    (nr, f["item_id"], mehr, f.get("name"), f.get("img_url"),
+                     jetzt))
+
+
+def _setinhalte_nachfuellen() -> int:
+    """Eigene Sets ohne oder mit zu kleinem Inhalt aus der Setdatei füllen.
+
+    Damit „👥 3/4“ und die fehlenden Set-Figuren auch ohne BrickLink-Zugang
+    stimmen – bisher kam der Inhalt nur beim Erfassen über BrickLink. Nur,
+    wo jede Figur eine BrickLink-Nummer hat (siehe `_katalog_antwort`).
+    Was dazukommt, fragt die App nach (`_inhalt_ergaenzen`).
+    """
+    abbildung = _rb_auf_bl()
+    with core.db() as conn:
+        sets = [r["item_id"] for r in conn.execute(
+            "SELECT DISTINCT item_id FROM collection WHERE item_type = 'set'")]
+    gefuellt = 0
+    for nr in sets:
+        if nr.startswith(("custom-", "manuell-")):
+            continue
+        katalog = _set_figs_katalog(nr, abbildung)
+        if not katalog or any(f.get("rebrickable") for f in katalog):
+            continue
+        if _katalog_kennt_mehr(katalog, _set_contents_lokal(nr)):
+            _inhalt_ergaenzen(nr, katalog)
+            gefuellt += 1
+    return gefuellt
+
+
+JUNG_JAHRE = 1                 # dieses und letztes Jahr
+JUNG_PRUEFEN_ALLE = 14 * 86400
+JUNG_JE_LAUF = 10
+
+
+def _junge_sets_nachpruefen(hoechstens: int = JUNG_JE_LAUF) -> int:
+    """Junge eigene Sets bei BrickLink noch einmal ansehen – alle zwei Wochen.
+
+    Anlass: 75455-1 wurde zum Erscheinen gekauft und erfasst; BrickLink
+    führte Boba Fett da noch nicht, und der leere Inhalt stand zwei Monate
+    (10.10.2026). Ein Inhalt wurde bisher nur einmal geholt. Jetzt
+    sieht der Nachtlauf bei Sets aus diesem und dem letzten Jahr nach, ob
+    BrickLink inzwischen mehr weiß – nur mit eigenem Zugang, und nur ein
+    paar je Nacht, damit das Kontingent den Preisen bleibt. Ohne Zugang
+    erledigt das der Abgleich mit der Setdatei (`_setinhalte_nachfuellen`).
+
+    Geändert wird nur der Set-Inhalt, nie die Sammlung – ob neue Figuren
+    hinein sollen, fragt die App (`_inhalt_ergaenzen`). Weniger Figuren als
+    gespeichert übernimmt er nicht, nur das Prüfdatum.
+    """
+    if not integrations.bricklink_enabled():
+        return 0
+    jetzt = int(time.time())
+    ab = time.localtime().tm_year - JUNG_JAHRE
+    with core.db() as conn:
+        rows = conn.execute(
+            "SELECT DISTINCT c.item_id FROM collection c"
+            " LEFT JOIN set_daten d ON d.nr = c.item_id"
+            " LEFT JOIN set_meta m ON m.set_no = c.item_id"
+            " WHERE c.item_type = 'set'"
+            " AND MAX(COALESCE(d.jahr, 0), COALESCE(c.year, 0)) >= ?"
+            " AND COALESCE(m.figs_fetched_at, 0) < ?"
+            " ORDER BY COALESCE(m.figs_fetched_at, 0) LIMIT ?",
+            (ab, jetzt - JUNG_PRUEFEN_ALLE, hoechstens)).fetchall()
+    geaendert = 0
+    for r in rows:
+        nr = r["item_id"]
+        if nr.startswith(("custom-", "manuell-")):
+            continue
+        try:
+            figs = integrations.bricklink_subsets(nr)
+        except Exception:
+            continue                  # morgen wieder; einzelne überspringen
+        alt = _set_contents_lokal(nr) or []
+        if sum(f.get("qty", 1) for f in figs) > sum(f.get("qty", 1) for f in alt):
+            _inhalt_ergaenzen(nr, figs)
+            geaendert += 1
+        else:
+            with core.db() as conn:
+                conn.execute(
+                    "INSERT INTO set_meta (set_no, figs_fetched_at) VALUES (?, ?)"
+                    " ON CONFLICT(set_no) DO UPDATE SET"
+                    " figs_fetched_at = excluded.figs_fetched_at", (nr, jetzt))
+    return geaendert
+
+
+@app.get("/api/set_neue_figuren")
+def set_neue_figuren(user: dict = Depends(current_user)):
+    """Eigene Sets, zu denen nachträglich Figuren bekannt wurden – je Set
+    mit Name, Zustand und den neuen Figuren, für die Nachfrage beim Öffnen.
+
+    Nur Sets, die noch in der Sammlung sind; was zu einem inzwischen
+    gelöschten Set gehört, fällt weg.
+    """
+    with core.db() as conn:
+        rows = conn.execute(
+            "SELECT n.*, c.name AS set_name, c.condition FROM set_neue_figuren n"
+            " JOIN collection c ON c.item_type = 'set' AND c.item_id = n.set_no"
+            " ORDER BY n.set_no, n.fig_no").fetchall()
+    sets: dict = {}
+    for r in rows:
+        e = sets.setdefault(r["set_no"], {
+            "item_id": r["set_no"], "item_type": "set", "name": r["set_name"],
+            "condition": r["condition"], "figuren": []})
+        if any(f["item_id"] == r["fig_no"] for f in e["figuren"]):
+            continue             # Set in zwei Zuständen erfasst
+        safe = requests.utils.quote(r["fig_no"])
+        e["figuren"].append({
+            "item_id": r["fig_no"], "item_type": "minifig",
+            "name": r["name"] or r["fig_no"], "qty": r["qty"],
+            "img_url": r["img_url"]
+            or f"https://img.bricklink.com/ItemImage/MN/0/{safe}.png",
+            "bricklink_url": ("https://www.bricklink.com/v2/catalog/"
+                              f"catalogitem.page?M={safe}")})
+    return {"sets": list(sets.values())}
+
+
+class NeueFigurenErledigtBody(BaseModel):
+    set_no: str = Field(min_length=1, max_length=40)
+
+
+@app.post("/api/set_neue_figuren/erledigt")
+def set_neue_figuren_erledigt(body: NeueFigurenErledigtBody,
+                              user: dict = Depends(current_user)):
+    """Gefragt ist gefragt – ob übernommen oder nicht, nicht noch einmal."""
+    with core.db() as conn:
+        conn.execute("DELETE FROM set_neue_figuren WHERE set_no = ?",
+                     (body.set_no,))
+    return {"ok": True}
 
 
 @app.get("/api/set_figs_owned/{set_no}")
@@ -7833,7 +9494,7 @@ def refresh_set_contents(limit: int = 10, user: dict = Depends(current_user)):
     """
     if not integrations.bricklink_enabled():
         raise HTTPException(501, "BrickLink-API nicht konfiguriert "
-                                 "(Schlüssel unter Mehr → API-Schlüssel)")
+                                 "(eigener Zugang unter Mehr → Preise)")
     limit = max(1, min(limit, 25))
     with core.db() as conn:
         rows = conn.execute(
@@ -7979,13 +9640,22 @@ def get_lists(archived: int = 0, user: dict = Depends(current_user)):
             "LEFT JOIN users u ON u.id = l.created_by "
             "WHERE l.archived = ? ORDER BY l.created_at DESC",
             (1 if archived else 0,)).fetchall()
+        # Alle Artikel in einer Abfrage statt einer je Liste – und die
+        # deutschen Namen einmal für alle (Durchsicht 17.10.2026).
+        alle = conn.execute(
+            "SELECT i.*, u.username AS done_by_name FROM shopping_items i "
+            "JOIN shopping_lists l ON l.id = i.list_id "
+            "LEFT JOIN users u ON u.id = i.done_by "
+            "WHERE l.archived = ? ORDER BY i.done, i.added_at",
+            (1 if archived else 0,)).fetchall()
+        mit_namen = _namen_de_anhaengen([dict(r) for r in alle])
+        je_liste: dict = {}
+        for r, z in zip(alle, mit_namen):
+            je_liste.setdefault(r["list_id"], []).append((r, z))
         out = []
         for entry in lists:
-            items = conn.execute(
-                "SELECT i.*, u.username AS done_by_name FROM shopping_items i "
-                "LEFT JOIN users u ON u.id = i.done_by "
-                "WHERE i.list_id = ? ORDER BY i.done, i.added_at",
-                (entry["id"],)).fetchall()
+            paare = je_liste.get(entry["id"], [])
+            items = [r for r, _ in paare]
             est_used = sum((r["price_used"] or r["price_new"] or 0) * r["qty"]
                            for r in items)
             est_new = sum((r["price_new"] or r["price_used"] or 0) * r["qty"]
@@ -7995,7 +9665,7 @@ def get_lists(archived: int = 0, user: dict = Depends(current_user)):
                       for r in items)
             open_n = sum(1 for r in items if not r["done"])
             paid_sum = sum(r["paid_price"] or 0 for r in items)
-            zeilen = [dict(r) for r in items]
+            zeilen = [z for _, z in paare]
             if not user["is_dealer"]:
                 # Listen sehen alle, was dafür bezahlt wurde nur Profis.
                 for z in zeilen:
@@ -8675,11 +10345,18 @@ def undo_list_item(item_id: int, user: dict = Depends(dealer_user)):
 
 # ---------------------------------------------------------------- Preise
 
-PRICE_STALE_SECONDS = 7 * 86400      # Hintergrund-Refresh: älter als 7 Tage
-# Der Refresher läuft alle zwölf Stunden, macht also zwei Läufe am Tag.
-PRICE_LAEUFE_JE_TAG = 2
-PRICE_STAPEL_MIN = 40                # wie bisher, für kleine Sammlungen
-PRICE_STAPEL_MAX = 400               # Deckel: schützt das BrickLink-Kontingent
+# Aus dem Hub wird neu nachgeschlagen, was älter als 20 Stunden ist – so
+# bleibt Luft bis zur Grenze (`hubpreise.FRISCH_STUNDEN`). Mit eigenem
+# Schlüssel gilt `preisabruf_stunden`. Bis 3.9.16 waren es sieben Tage.
+PRICE_STALE_SECONDS = 20 * 3600
+# `_preis_takt` läuft jede Stunde.
+PRICE_LAEUFE_JE_TAG = 24
+PRICE_STAPEL_MIN = 10
+# Deckel für alle Listen zusammen: 72 Artikel je Stunde sind gut 1.700 am
+# Tag, mit zwei Abrufen je Artikel 3.456 von BrickLinks 5.000. Der Rest
+# bleibt für Rücklage und Namen (`katalog_namen_je_lauf`). Wer mehr hat,
+# sieht beim Rest keinen Preis, statt dass der Zugang gesperrt wird.
+PRICE_STAPEL_MAX = 72
 
 
 PRICE_TABLES = ("collection", "wanted", "shopping_items")
@@ -8741,6 +10418,7 @@ def _auto_backup():
     dst_conn = sqlite3.connect(target)
     try:
         src_conn.backup(dst_conn)
+        core.als_einzeldatei(dst_conn)
     finally:
         dst_conn.close()
         src_conn.close()
@@ -8867,7 +10545,7 @@ def _kaufbuch_abgang(conn, entry_id: int, stueck: int) -> None:
 def _maybe_fetch_prices_async(entry_id: int, item_id: str,
                               table: str = "collection"):
     """Preise für einen neuen/korrigierten Eintrag im Hintergrund holen."""
-    if table not in PRICE_TABLES or not integrations.bricklink_enabled():
+    if table not in PRICE_TABLES or not integrations.preise_moeglich():
         return
     if item_id.startswith(("fig-", "manuell-", "custom-")):
         return
@@ -8952,11 +10630,18 @@ def _preise_beider_zustaende(item_type: str, item_no: str,
     Alles außer 404 fliegt weiter – ein Zeitüberlauf ist keine unbekannte
     Nummer und darf nicht als solche durchgehen.
     """
-    result, not_found = {}, 0
+    result, not_found, ohne_hub = {}, 0, None
     for cond, key in (("N", "new"), ("U", "used")):
         try:
             result[key] = integrations.price_guide(item_type, item_no, cond,
                                                    use_cache=use_cache)
+        except hubpreise.KeinHubPreis as e:
+            # Hub-Abzug: Fehlt nur ein Zustand, bleibt der andere stehen.
+            # Fehlen beide, ist das kein Preis von null, sondern keiner.
+            if ohne_hub:
+                raise
+            ohne_hub = e
+            result[key] = None
         except requests.HTTPError as e:
             code = e.response.status_code if e.response is not None else 0
             if code != 404:
@@ -8974,7 +10659,13 @@ def _angebote_beider_zustaende(item_type: str, item_no: str,
     Eine Figur, die gerade niemand anbietet, ist ein gültiger Zustand und
     darf die Anzeige der anderen Hälfte nicht verhindern. Deshalb fliegt
     hier nichts, es bleibt schlicht leer.
+
+    **Nur mit eigenem Schlüssel** (3.9.17). Der Preisdienst führt nur
+    Verkäufe: „Dann sind die App preise an einen eigenen Schlüßel gebunden.
+    Das können wir nicht auch noch.“ (15.10.2026)
     """
+    if hubpreise.an():
+        return {}
     out = {}
     for cond, key in (("N", "new"), ("U", "used")):
         try:
@@ -9020,13 +10711,21 @@ def _fetch_and_store_prices(entry: dict, table: str = "collection",
         raise LookupError(_unbekannt_meldung(entry["item_id"]))
 
     def avg(d):
+        # Auf Cent (3.9.32): Die Preise aus dem Hub tragen bis zu sieben
+        # Nachkommastellen als Wasserzeichen. Die bleiben im lokalen Abzug;
+        # was in die Sammlung und damit in den Abgleich geht, ist gerundet.
         try:
-            value = float(d["avg"]) if d and d.get("avg") else None
+            value = round(float(d["avg"]), 2) if d and d.get("avg") else None
             return value if value else None
         except (TypeError, ValueError):
             return None
 
     now = int(time.time())
+    # Aus dem Hub zählt, wann der Katalogdienst den Preis bei BrickLink
+    # geholt hat, nicht wann hier nachgeschlagen wurde – sonst lebte ein
+    # Preis vom Vortag hier noch einmal einen ganzen Tag.
+    stand = min((d["geholt_am"] for d in (result.get("new"), result.get("used"))
+                 if d and d.get("geholt_am")), default=now)
     payload = json.dumps({"new": result.get("new"), "used": result.get("used")})
     # Gebiet mitschreiben, damit nach einer Umstellung erkennbar ist, welche
     # Preise noch aus dem alten Gebiet stammen.
@@ -9037,7 +10736,7 @@ def _fetch_and_store_prices(entry: dict, table: str = "collection",
             f"UPDATE {table} SET price_new = ?, price_used = ?, "
             "price_updated_at = ?, price_data = ?, price_region = ?, "
             "price_currency = ? WHERE id = ?",
-            (avg(result.get("new")), avg(result.get("used")), now, payload,
+            (avg(result.get("new")), avg(result.get("used")), stand, payload,
              region, waehrung, entry["id"]))
     if not entry.get("year"):
         try:
@@ -9060,18 +10759,19 @@ def _fetch_and_store_prices(entry: dict, table: str = "collection",
                         "UPDATE collection SET paid_price = ?, "
                         "paid_source = 'auto', paid_at = ? WHERE id = ?",
                         (round(unit * r["quantity"], 2), now, r["id"]))
+    history_ts = stand if hubpreise.an() else now
     with core.db() as conn:
         last = conn.execute(
             "SELECT id, ts FROM price_history WHERE item_id = ? AND "
             "item_type = ? ORDER BY ts DESC LIMIT 1",
             (entry["item_id"], entry["item_type"])).fetchone()
-        if not last or now - last["ts"] > 20 * 3600:
+        if not last or history_ts - last["ts"] > 20 * 3600:
             conn.execute(
                 "INSERT INTO price_history (item_id, item_type, ts, "
                 "price_new, price_used, source) VALUES (?, ?, ?, ?, ?, ?)",
-                (entry["item_id"], entry["item_type"], now,
+                (entry["item_id"], entry["item_type"], history_ts,
                  avg(result.get("new")), avg(result.get("used")), source))
-        elif source == "manuell":
+        elif source == "manuell" and not hubpreise.an():
             # Innerhalb der 20h: jüngsten Punkt aktualisieren statt
             # verwerfen – so stimmt das Protokoll, das Chart bleibt sauber
             conn.execute(
@@ -9079,13 +10779,51 @@ def _fetch_and_store_prices(entry: dict, table: str = "collection",
                 "price_used = ?, source = 'manuell' WHERE id = ?",
                 (now, avg(result.get("new")), avg(result.get("used")),
                  last["id"]))
-    result["updated_at"] = now
+    result["updated_at"] = stand
     # Kam der Preis unter der BrickLink-Nummer, gehört die dazugesagt: Sonst
     # steht im Popup ein Preis, den man auf BrickLink unter der eigenen
     # Nummer nirgends wiederfindet.
     if benutzt != entry["item_id"]:
         result["bl_no"] = benutzt
     return result
+
+
+# Was der Hub auf eine Set-Anfrage zuletzt sagte – für den Satz unter
+# „Preis bei BrickLink ansehen“. Nur im Speicher, je Nummer: (Antwort, Zeit).
+_set_anfragen: dict = {}
+# Jedes Öffnen eines Sets ohne Preis fragte den Hub erneut, obwohl er eben
+# „vorgemerkt“ gesagt hatte. Die iOS-App merkt sich die Antwort eine Stunde
+# lang; die SE jetzt auch (Durchsicht 17.10.2026).
+SET_ANFRAGE_PAUSE = 3600
+
+
+def _hub_set_anfragen(item_type: str, item_no: str) -> bool:
+    """Ein Set ohne frischen Preis beim Hub anfragen. True, wenn er einen
+    frischen hatte – dann steht er jetzt im lokalen Abzug."""
+    if item_type != "set" or not hubpreise.an():
+        return False
+    zuletzt = _set_anfragen.get(item_no.lower())
+    if zuletzt and zuletzt[0] != "frisch" \
+            and time.time() - zuletzt[1] < SET_ANFRAGE_PAUSE:
+        return False
+    try:
+        status = hubpreise.anfrage(item_no, integrations.price_region())
+    except Exception as e:
+        print(f"[nupplo] Set-Preis anfragen übersprungen: {e}", flush=True)
+        return False
+    _set_anfragen[item_no.lower()] = (status, time.time())
+    return status == "frisch"
+
+
+def _kein_hub_preis_satz(item_type: str, item_no: str,
+                         fehler: Exception) -> str:
+    zuletzt = _set_anfragen.get(item_no.lower()) if item_type == "set" else None
+    status = zuletzt[0] if zuletzt else None
+    if status == "vorgemerkt":
+        return "Preis ist angefragt. Schau später noch mal rein."
+    if status == "nicht_im_dienst":
+        return "Für dieses Set hat der Preisdienst keinen Preis."
+    return str(fehler)
 
 
 @app.get("/api/collection/{entry_id}/price")
@@ -9098,9 +10836,9 @@ def entry_price(entry_id: int, refresh: int = 0, angebote: int = 0,
     überholt, und der gespeicherte Wert der Sammlung soll weiter auf dem
     beruhen, was tatsächlich bezahlt wurde.
     """
-    if not integrations.bricklink_enabled():
-        raise HTTPException(501, "BrickLink-API nicht konfiguriert "
-                                 "(Schlüssel unter Mehr → API-Schlüssel eintragen)")
+    if not integrations.preise_moeglich():
+        raise HTTPException(501, "Keine Preisquelle eingerichtet "
+                                 "(Preisdienst oder eigener Zugang unter Mehr → Preise)")
     with core.db() as conn:
         row = conn.execute("SELECT * FROM collection WHERE id = ?",
                            (entry_id,)).fetchone()
@@ -9117,7 +10855,13 @@ def entry_price(entry_id: int, refresh: int = 0, angebote: int = 0,
                 entry["item_type"], entry["item_id"])
         return antwort
 
-    if not refresh:
+    # **Ist er fällig, prüft der Server die Quelle erneut** – bei Hub-Sets
+    # kann das den letzten bekannten Preis liefern, bis ein neuerer vorliegt.
+    frisch = (entry.get("price_updated_at") or 0) \
+        >= int(time.time()) - _auffrischen_nach_s() \
+        and (entry.get("price_data") or entry.get("price_new")
+             or entry.get("price_used"))
+    if not refresh and frisch:
         if entry.get("price_data"):
             try:
                 data = json.loads(entry["price_data"])
@@ -9131,7 +10875,15 @@ def entry_price(entry_id: int, refresh: int = 0, angebote: int = 0,
              "used": {"avg": entry["price_used"]} if entry.get("price_used") else None,
              "updated_at": entry.get("price_updated_at"), "cached": True})
     try:
-        return _mit_angeboten(_fetch_and_store_prices(entry, source="manuell"))
+        return _mit_angeboten(_fetch_and_store_prices(
+            entry, source="manuell" if refresh else "auto"))
+    except hubpreise.KeinHubPreis as e:
+        if _hub_set_anfragen(entry["item_type"], entry["item_id"]):
+            try:
+                return _mit_angeboten(_fetch_and_store_prices(entry))
+            except (LookupError, hubpreise.KeinHubPreis):
+                pass
+        raise HTTPException(404, _kein_hub_preis_satz(entry["item_type"], entry["item_id"], e))
     except LookupError as e:
         raise HTTPException(404, str(e))
     except requests.Timeout:
@@ -9152,9 +10904,9 @@ def get_price(item_type: str, item_no: str, angebote: int = 0,
     Figur gerade kostet) — das kostet zwei weitere BrickLink-Abrufe und
     wird deshalb nur auf Verlangen geholt.
     """
-    if not integrations.bricklink_enabled():
-        raise HTTPException(501, "BrickLink-API nicht konfiguriert "
-                                 "(Schlüssel unter Mehr → API-Schlüssel eintragen)")
+    if not integrations.preise_moeglich():
+        raise HTTPException(501, "Keine Preisquelle eingerichtet "
+                                 "(Preisdienst oder eigener Zugang unter Mehr → Preise)")
     try:
         result, not_found, benutzt = _preise_mit_zweitnummer(
             item_type, item_no, use_cache=True)
@@ -9165,6 +10917,14 @@ def get_price(item_type: str, item_no: str, angebote: int = 0,
         raise HTTPException(502, f"BrickLink-Fehler ({code})")
     except requests.RequestException:
         raise HTTPException(502, "BrickLink nicht erreichbar")
+    except hubpreise.KeinHubPreis as e:
+        if not _hub_set_anfragen(item_type, item_no):
+            raise HTTPException(404, _kein_hub_preis_satz(item_type, item_no, e))
+        try:
+            result, not_found, benutzt = _preise_mit_zweitnummer(
+                item_type, item_no, use_cache=True)
+        except hubpreise.KeinHubPreis as e2:
+            raise HTTPException(404, _kein_hub_preis_satz(item_type, item_no, e2))
     except (ValueError, RuntimeError) as e:
         raise HTTPException(400, str(e))
     if not_found == 2:
@@ -9202,10 +10962,14 @@ def get_angebote(body: AngeboteBody, user: dict = Depends(current_user)):
     Je Eintrag wird nur der **angefragte Zustand** geholt, nicht beide:
     Auf einer Wunschliste steht, in welchem Zustand das Stück gesucht wird.
     """
-    if not integrations.bricklink_enabled():
-        raise HTTPException(501, "BrickLink-API nicht konfiguriert "
-                                 "(Schlüssel unter Mehr → API-Schlüssel eintragen)")
+    if not integrations.preise_moeglich():
+        raise HTTPException(501, "Keine Preisquelle eingerichtet "
+                                 "(Preisdienst oder eigener Zugang unter Mehr → Preise)")
     out = {}
+    if hubpreise.an():
+        # Angebote nur mit eigenem Schlüssel, siehe
+        # `_angebote_beider_zustaende`.
+        return {"angebote": out}
     for eintrag in body.items:
         nr = str(eintrag.get("item_no") or "").strip()
         typ = str(eintrag.get("item_type") or "minifig").strip()
@@ -9225,12 +10989,25 @@ def get_angebote(body: AngeboteBody, user: dict = Depends(current_user)):
 @app.get("/api/history/{item_type}/{item_no}")
 def get_price_history(item_type: str, item_no: str,
                       user: dict = Depends(current_user)):
+    """Der Verlauf – **nur neben einem frischen Preis**.
+
+    Er ist Zugabe zu einem frischen Wert, nie Ersatz dafür (aus dem Hub
+    höchstens `hubpreise.FRISCH_STUNDEN` alt). Hat der Artikel gerade keinen, bleibt der Verlauf leer.
+    """
     with core.db() as conn:
+        frisch = any(conn.execute(
+            f"SELECT 1 FROM {t} WHERE item_id = ? AND item_type = ? AND "
+            "price_updated_at >= ? AND (price_new IS NOT NULL OR "
+            "price_used IS NOT NULL) LIMIT 1",
+            (item_no, item_type, _anzeige_ab())).fetchone()
+            for t in PRICE_TABLES)
+        if not frisch:
+            return {"points": [], "frisch": False}
         rows = conn.execute(
             "SELECT ts, price_new, price_used FROM price_history "
             "WHERE item_id = ? AND item_type = ? ORDER BY ts ASC LIMIT 400",
             (item_no, item_type)).fetchall()
-    return {"points": [dict(r) for r in rows]}
+    return {"points": [dict(r) for r in rows], "frisch": True}
 
 
 # ---------------------------------------------------------------- Frontend
@@ -9362,6 +11139,28 @@ def service_worker():
                         media_type="application/javascript")
 
 
+
+def _dateimarke() -> str:
+    """Die Marke `?v=` an den Oberflächendateien: Version plus Prüfsumme
+    der Dateien.
+
+    Nur die Version reichte nicht: Nupplo für Windows bringt neue
+    Oberflächen mit derselben SE-Version (0.6.0 mit 3.9.37 wie 0.5.4), und
+    WebView2 hielt die alte `app.js` dann dauerhaft fest (VM, 23.11.2026).
+    """
+    return f"{core.APP_VERSION}-{_dateien_pruefsumme()}"
+
+
+@functools.lru_cache(maxsize=1)
+def _dateien_pruefsumme() -> str:
+    h = hashlib.sha256()
+    for name in sorted(os.listdir(FRONTEND_DIR)):
+        pfad = os.path.join(FRONTEND_DIR, name)
+        if name.endswith((".js", ".css", ".html")) and os.path.isfile(pfad):
+            with open(pfad, "rb") as f:
+                h.update(name.encode() + b"\0" + f.read())
+    return h.hexdigest()[:8]
+
 @app.get("/")
 def index():
     """Startseite mit eingesetzter Versionsnummer.
@@ -9377,7 +11176,8 @@ def index():
         # stand im Reiter sonst „'s Nupplo" – die Vorlage klebte das
         # Genitiv-s an eine leere Zeichenkette. `_app_title()` kennt den
         # Fall und liefert dann »Dein Nupplo«.
-        seite = (f.read().replace("__APPVERSION__", core.APP_VERSION)
+        seite = (f.read().replace("?v=__APPVERSION__", "?v=" + _dateimarke())
+                 .replace("__APPVERSION__", core.APP_VERSION)
                  # Die eine Stelle **im Attribut** zuerst und mit
                  # Anführungszeichen-Schutz: Ein Name mit `"` brach sonst aus
                  # `content="…"` aus (Gesamttest 26.09.2026).
@@ -9400,6 +11200,10 @@ import community  # noqa: E402
 
 app.include_router(community.router)
 
+# Teile je Figur und „Im Bau" – braucht Anmeldung und den BrickLink-Weg
+# von hier, also ebenfalls am Ende.
+app.include_router(figurteile.router)
+
 # Abgleich für externen Zugriff – aus demselben Grund am Ende.
 import sync  # noqa: E402
 
@@ -9408,8 +11212,43 @@ app.include_router(sync.router)
 # Externer Zugriff ohne Portfreigabe – ruft den Server im Prozess auf, braucht
 # ihn also fertig.
 import connect  # noqa: E402
+import desktop  # noqa: E402
 
 app.include_router(connect.router)
+
+# Nupplo als Programm auf einem einzelnen Rechner (Nupplo für Windows) – ohne
+# `NUPPLO_DESKTOP=1` antwortet `/desktop/start` mit 404, und es wird kein
+# Konto angelegt.
+
+app.include_router(desktop.router)
+
+
+# Abgleich mit der SE zu Hause – nur im Desktop-Modus (Nupplo für Windows).
+import abgleich  # noqa: E402
+
+app.include_router(abgleich.router)
+
+# … oder über einen eigenen Cloud-Ordner, ganz ohne SE (Windows 0.4.0).
+import ordner  # noqa: E402
+
+app.include_router(ordner.router)
+
+# Live-Scanner im Fenster der App, ohne eigenes Programm (Windows 0.5.0).
+import bildschirm  # noqa: E402
+
+app.include_router(bildschirm.router)
+
+
+@app.on_event("startup")
+def _desktop_einrichten():
+    # Nach `startup` oben, das die Tabellen anlegt – Starlette ruft die
+    # Startfunktionen in der Reihenfolge ihrer Anmeldung auf.
+    desktop.einrichten()
+    if desktop.an():
+        with core.db() as conn:
+            abgleich.migrieren(conn)
+            ordner.migrieren(conn)
+        threading.Thread(target=abgleich.waechter, daemon=True).start()
 
 
 @app.on_event("startup")
@@ -9417,6 +11256,11 @@ async def _connect_starten():
     # Im laufenden Ereignis-Loop, weil die Leitung zum Vermittler asynchron
     # ist. Ist der Zugriff aus (Vorgabe), passiert hier nichts weiter als das
     # Anlegen der Schlüssel.
+    if desktop.an():
+        # Nupplo für Windows ist keine Connect-Instanz (siehe connect.py) –
+        # nicht einmal Schlüssel anlegen. Eine mitgenommene SE-Datenbank mit
+        # `connect_an=1` meldete sich sonst beim Vermittler an.
+        return
     try:
         connect.verbinder.einrichten(app)
     except Exception as e:                  # nie am Start scheitern

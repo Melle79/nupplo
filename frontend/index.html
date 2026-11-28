@@ -73,7 +73,7 @@
     <input type="file" id="setup-restore-file" accept="application/json,.json"
            hidden>
     <p class="setup-hint">🌐 Von unterwegs zugreifen? Das lässt sich gleich
-      danach unter <b>Mehr → Externer Zugriff</b> einrichten – optional und
+      danach unter <b>Mehr → Zugriff ohne Portfreigabe</b> einrichten – optional und
       jederzeit möglich.</p>
   </div>
   <div class="login-box" id="login-box">
@@ -131,15 +131,38 @@
       <input id="wiz-owner" maxlength="40" placeholder="ohne Namen" autocapitalize="words">
     </div>
 
-    <!-- 2: Preisgebiet und Währung -->
+    <!-- 2: Preise. Bis 3.9.0 ging es hier nur um Gebiet und Währung, und
+         Schritt 4 verlangte vier BrickLink-Werte, als ginge es nicht ohne.
+         Seit es den Preisdienst gibt, ist das die erste Frage. Nichts ist
+         vorausgewählt: Der Preisdienst geht ins Netz, und das soll man
+         selbst entscheiden. -->
     <div class="wiz-step" data-step="2" hidden>
-      <h3>🌍 Preise und Währung</h3>
-      <p class="search-hint">Aus welchem Markt sollen die Ø-Preise von
-        BrickLink stammen, und in welcher Währung? Vorausgewählt ist, was zu
-        den Einstellungen deines Browsers passt. Findet BrickLink im
-        gewählten Land keine Verkäufe, weitet die App von selbst aus – erst
-        auf die Region, dann weltweit. Später änderbar unter
-        <b>Mehr → Preisgebiet</b>.</p>
+      <h3>💶 Preise</h3>
+      <!-- Seit 3.9.17 entweder – oder: mit eigenem Schlüssel alles selbst,
+           ohne nur der Preisdienst, und der kennt nur zwei Reihen. Das muss
+           man hier erfahren, nicht erst beim ersten leeren Preis. -->
+      <p class="search-hint">Ohne eigenen Schlüssel zeigt Nupplo Preise für
+        Star Wars und Herr der Ringe, Figuren und Sets. Bei allem anderen
+        steht ein Link zu BrickLink.</p>
+      <p class="search-hint">Alle Preise bekommst du mit einem eigenen
+        BrickLink-Schlüssel. BrickLink gibt ihn nur an Shops: Eröffne dort
+        einen Shop, der darf leer bleiben. Dann kannst du den Schlüssel
+        beantragen.</p>
+      <label class="wahl-kasten">
+        <input type="radio" name="wiz-quelle" value="hub">
+        <span><b>Ohne eigenen Schlüssel.</b></span>
+      </label>
+      <label class="wahl-kasten">
+        <input type="radio" name="wiz-quelle" value="bricklink">
+        <span><b>Mit eigenem Schlüssel.</b> Die Schlüssel trägst du gleich
+          noch ein.</span>
+      </label>
+      <div class="paid-row" id="wiz-abruf" hidden>
+        <span class="paid-label">Preise holen alle</span>
+        <input id="wiz-abruf-stunden" class="paid-input" inputmode="numeric"
+          value="24" style="flex:0 0 64px;width:64px">
+        <span class="paid-suffix">Stunden</span>
+      </div>
       <label for="wiz-region">Preise berechnen für</label>
       <span class="select-wrap"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.7 2.5 15.3 0 18M12 3c-2.5 2.7-2.5 15.3 0 18"/></svg>
         <select id="wiz-region"></select>
@@ -148,27 +171,28 @@
       <span class="select-wrap"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v10M9.5 9.5h5M9.5 14.5h5"/></svg>
         <select id="wiz-currency"></select>
       </span>
+      <p class="search-hint">Später änderbar unter <b>Mehr → Preise</b>.</p>
     </div>
 
     <!-- 3: Rebrickable -->
     <div class="wiz-step" data-step="3" hidden>
-      <h3>🔎 Katalogsuche (Rebrickable)</h3>
-      <p class="search-hint">Damit findet die App Figuren und Sets über den
-        Namen. Der Schlüssel ist kostenlos: Konto anlegen, Profil öffnen,
-        Schlüssel kopieren.</p>
+      <h3>🔎 Katalogsuche (freiwillig)</h3>
+      <p class="search-hint">Figuren findest du auch ohne. Mit einem
+        kostenlosen Schlüssel von Rebrickable kommen Sets, Teile und ganz
+        neue Figuren dazu.</p>
       <p><a href="https://rebrickable.com/api/" target="_blank" rel="noopener noreferrer"
             class="wiz-link">Schlüssel bei Rebrickable holen ↗</a></p>
-      <label for="wiz-rb">Rebrickable Key</label>
+      <label for="wiz-rb">Rebrickable-Schlüssel</label>
       <input id="wiz-rb" autocapitalize="none" autocomplete="off" spellcheck="false"
              placeholder="leer lassen und später nachtragen">
     </div>
 
     <!-- 4: BrickLink -->
     <div class="wiz-step" data-step="4" hidden>
-      <h3>💶 Preise und Set-Inhalte (BrickLink)</h3>
-      <p class="search-hint">Vier Werte, die BrickLink dir auf einer Seite
-        anzeigt, nachdem du dort ein Konto hast. Ohne sie funktioniert alles
-        außer Preisen und Set-Inhalten.</p>
+      <h3>🔑 Eigener BrickLink-Zugang (freiwillig)</h3>
+      <p class="search-hint">Für Preise nur nötig, wenn du eben „Mit eigenem
+        Schlüssel“ gewählt hast. Er bringt außerdem Set-Inhalte und Namen
+        beim Erfassen.</p>
       <p><a href="https://www.bricklink.com/v2/api/register_consumer.page"
             target="_blank" rel="noopener noreferrer" class="wiz-link">Zugang bei BrickLink beantragen ↗</a></p>
       <label for="wiz-bck">Consumer Key</label>
@@ -184,9 +208,9 @@
     <!-- 5: Prüfen -->
     <div class="wiz-step" data-step="5" hidden>
       <h3>✅ Kurz nachsehen, ob es klappt</h3>
-      <p class="search-hint">Ein echter Testabruf bei beiden Diensten – so
-        merkst du jetzt, ob ein Schlüssel verdreht ist, und nicht erst beim
-        ersten Scan.</p>
+      <p class="search-hint">Ein echter Test bei jedem Dienst. So merkst du
+        jetzt, ob ein Schlüssel verdreht ist, und nicht erst beim ersten
+        Scan.</p>
       <button class="btn btn-outline" id="wiz-test">Verbindung prüfen</button>
       <p id="wiz-test-out" class="search-hint" hidden></p>
     </div>
@@ -204,8 +228,15 @@
       <p id="wiz-hub-out" class="search-hint" hidden></p>
     </div>
 
+    <!-- 7 in Nupplo für Windows: Abgleich statt Zwei-Faktor (dort gibt
+         es kein Passwort). Das CSS zeigt je nach Modus nur eine der beiden. -->
+    <div class="wiz-step nur-desktop" data-step="7" hidden>
+      <h3>🔄 Abgleich</h3>
+      <div id="wiz-abgleich-platz"></div>
+    </div>
+
     <!-- 7: Absichern -->
-    <div class="wiz-step" data-step="7" hidden>
+    <div class="wiz-step nur-server" data-step="7" hidden>
       <h3>🔐 Absichern mit Zwei-Faktor</h3>
       <p class="search-hint">Empfohlen, sobald die App von außen erreichbar
         ist: Zum Passwort kommt ein sechsstelliger Code aus einer
@@ -262,7 +293,7 @@
         <button class="mini-btn" id="install-hide">Nicht mehr anzeigen</button>
       </div>
     </div>
-    <div class="scan-hero">
+    <div class="scan-hero nur-scan">
       <button id="btn-camera" class="brick-button" data-scan-drop>
         <span class="brick-studs"><i></i><i></i><i></i><i></i></span>
         <svg viewBox="0 0 24 24" width="42" height="42" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
@@ -285,6 +316,33 @@
            entschieden (23.09.2026): Ein Bild, das man schon hat, war vorher
            gar nicht scanbar. -->
       <input id="file-input" type="file" accept="image/*" hidden>
+    </div>
+    <!-- Live-Scanner, nur im Fenster von Nupplo für Windows
+         (`backend/bildschirm.py`). Bis 0.4.6 ein eigenes Programm in eigenem
+         Fenster; 07.11.2026: „wie in der Mac-App … Komplett
+         integriert.“ Ausgelöste Bilder gehen durch `handlePhoto` wie ein
+         hineingezogenes Foto. -->
+    <div id="livescan-karte" class="settings-card nur-desktop nur-live" hidden>
+      <h3>🎥 Live vom Bildschirm <span class="livescan-stand" id="livescan-stand"></span></h3>
+      <p class="search-hint" id="livescan-erklaerung">Nupplo schaut auf einen Bereich deines Bildschirms, etwa ein Video oder einen Stream. Steht dort eine neue Figur still, wird sie erkannt.</p>
+      <p class="search-hint" id="livescan-bereich"></p>
+      <div class="detail-row btn-grid">
+        <button class="mini-btn" id="btn-livescan-bereich">🔲 Bereich wählen</button>
+        <button class="mini-btn add" id="btn-livescan-an" disabled>▶ Automatik an</button>
+        <button class="mini-btn" id="btn-livescan-jetzt" disabled>📸 Jetzt erkennen</button>
+      </div>
+      <div class="livescan-schalter">
+        <label class="livescan-haken"><input type="checkbox" id="livescan-nurfiguren"> 🧍 Nur Figuren</label>
+        <label class="livescan-haken"><input type="checkbox" id="livescan-ton"> 🔔 Ton bei Wunsch</label>
+        <label class="search-hint livescan-stufe">Empfindlichkeit
+          <select id="livescan-stufe">
+            <option value="hoch">hoch</option>
+            <option value="mittel">mittel</option>
+            <option value="niedrig">niedrig</option>
+          </select>
+        </label>
+      </div>
+      <p class="error" id="livescan-fehler" hidden></p>
     </div>
 
     <!-- **Die Kamera in der App statt des Systemdialogs.**
@@ -322,6 +380,11 @@
       </div>
     </div>
 
+    <!-- Im Live-Modus Aufnahme und Katalogbild des besten Treffers groß
+         nebeneinander, wie in der Mac-App (dort 15.10.2026, Sven: „das
+         Vergleichsbild fehlt (das Katalogbild)“). Sonst `display: contents`
+         und damit ohne Wirkung. -->
+    <div class="live-paar">
     <div id="scan-preview" class="scan-preview" hidden>
       <div class="scan-bild">
         <img id="preview-img" alt="Aufgenommenes Foto">
@@ -352,10 +415,28 @@
         <span class="spinner"></span> <span data-scan-text>Erkenne …</span>
       </div>
     </div>
+    <div id="live-katalog" class="live-katalog nur-live" hidden>
+      <img id="live-katalog-bild" alt="">
+      <span id="live-katalog-text"></span>
+    </div>
+    </div>
 
+    <!-- Ansichten derselben Figur zum Anhaken (Mac-App: `AnsichtenWahl`).
+         Angehakte kommen beim Übernehmen als eigenes Foto an den Artikel. -->
+    <div id="live-ansichten" class="settings-card nur-live" hidden>
+      <p class="search-hint">Ansichten dieser Figur – angehakte kommen beim Hinzufügen als Foto an den Artikel.</p>
+      <div id="live-ansichten-liste" class="live-ansichten-liste"></div>
+    </div>
     <div id="scan-results" class="results"></div>
+    <!-- Verlauf des Live-Scanners: jede Erkennung eine Zeile, ein Klick holt
+         sie zurück (wie `VerlaufListe` in der Mac-App). Bleibt nur, solange
+         das Fenster offen ist; die Bilder verlassen den Rechner nicht. -->
+    <div id="live-verlauf" class="settings-card nur-live" hidden>
+      <h3>🕘 Verlauf</h3>
+      <div id="live-verlauf-liste" class="live-verlauf-liste"></div>
+    </div>
 
-    <button id="btn-scan-custom" class="btn btn-outline" hidden>🎨 Eigene Figur mit diesem Foto</button>
+    <button id="btn-scan-custom" class="btn btn-outline nur-scan" hidden>🎨 Eigene Figur mit diesem Foto</button>
     <button id="btn-manual-toggle" class="btn btn-outline">✏️ Manuell erfassen</button>
     <!-- „Manuell erfassen" – seit 2.88.36 mit eigenen Bauteilen statt
          Systemauswahl. Die alten Felder `m-type`, `m-cond` und `m-qty`
@@ -560,8 +641,12 @@
         </div>
       </div>
       <div class="kat-kopf">
-        <input id="kat-suche" type="search" placeholder="Im Thema suchen …"
-               autocomplete="off" enterkeyhint="search">
+        <span class="search-wrap">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.6-3.6"/></svg>
+          <input id="kat-suche" type="search" placeholder="Im Thema suchen …"
+                 autocomplete="off" enterkeyhint="search">
+          <button type="button" class="search-clear" data-clear="kat-suche" aria-label="Suche leeren">×</button>
+        </span>
         <span id="kat-zahl" class="kat-zahl">–</span>
       </div>
       <div class="tab-row" id="kat-filter">
@@ -653,6 +738,7 @@
         <button type="button" class="cm-chip" data-art-filter="tausch">🔄 Tausch</button>
         <button type="button" class="cm-chip" data-art-filter="verkauf">💶 Verkauf</button>
       </div>
+      <select id="hub-land-filter" class="cm-land-filter" aria-label="Land oder Kontinent" hidden></select>
       <div class="detail-row btn-grid">
         <button class="mini-btn" id="hub-refresh-offers">🔄 Aktualisieren</button>
       </div>
@@ -682,6 +768,23 @@
     </section>
   </main>
 
+  <!-- Live-Scanner: Bereich auf einem Bildschirmfoto aufziehen -->
+  <div id="livescan-wahl" class="card-modal-overlay" hidden>
+    <div class="card-modal livescan-wahl-box">
+      <button class="card-modal-close" id="livescan-wahl-zu" aria-label="Schließen">✕</button>
+      <div class="card modal-inner open" role="dialog" aria-modal="true">
+        <h3 style="margin:0 0 4px">🔲 Bereich wählen</h3>
+        <p class="search-hint" style="margin:0 0 8px">Mit der Maus einen Rahmen um das Bild ziehen, in dem die Figuren erscheinen.</p>
+        <div class="livescan-flaeche" id="livescan-flaeche">
+          <img id="livescan-foto" alt="" draggable="false">
+          <div id="livescan-rahmen" hidden></div>
+        </div>
+        <div class="card-actions scan-tasten" style="margin-top:10px">
+          <button class="mini-btn add" id="livescan-wahl-ok" disabled>✔ Übernehmen</button>
+        </div>
+      </div>
+    </div>
+  </div>
   <!-- Profil eines Mitglieds -->
   <div id="profil-overlay" class="card-modal-overlay" hidden>
     <div class="card-modal">
@@ -871,14 +974,16 @@
   <main id="view-settings" class="view" hidden>
     <h2>Einstellungen</h2>
 
+    <!-- Die Texte hier sind am 10.10.2026 auf Wunsch gekürzt worden: Ein
+         Satz, der erklärt, was eine Einstellung tut, und höchstens einer,
+         was man wissen muss. Die Begründungen stehen im Code und im
+         Handbuch, nicht auf der Karte. -->
     <section class="settings-group" id="grp-ich">
       <h3 class="settings-group-title">🙋 Für dich</h3>
-      <p class="settings-group-hint">Gilt für dein Konto – auf jedem Gerät, an dem du angemeldet bist.</p>
+      <p class="settings-group-hint">Gilt für dein Konto, auf jedem Gerät.</p>
     <div class="settings-card" id="lang-card">
       <h3>🌐 Sprache</h3>
-      <p class="search-hint">Die Wahl wird in deinem Profil gespeichert und
-        gilt auf allen Geräten. Ohne eigene Wahl folgt die App der Sprache
-        deines Browsers.</p>
+      <p class="search-hint">Ohne Wahl nimmt Nupplo die Sprache deines Browsers.</p>
       <div class="detail-row btn-grid">
         <button class="mini-btn cond" data-lang-pick="de">🇩🇪 Deutsch</button>
         <button class="mini-btn cond" data-lang-pick="en">🇬🇧 English</button>
@@ -900,17 +1005,12 @@
           <button class="theme-default-star" data-default-theme-pick="nova" hidden>☆</button>
         </div>
       </div>
-      <p class="search-hint">„Galaxie" ist ein dunkles, weltraum-inspiriertes
-        Design, „Nova" ein modernes Glas-Design mit blauem Akzent. Deine Wahl
-        wird in deinem Profil gespeichert und gilt auf allen Geräten.</p>
-      <p class="search-hint" id="default-theme-hint" hidden>⭐ markiert das
-        <b>Standard-Design</b> (Login-Bildschirm und Benutzer ohne eigene Wahl).
-        Tippe den Stern eines Designs, um es zum Standard zu machen.</p>
+      <p class="search-hint">„Galaxie“ ist dunkel wie der Weltraum, „Nova“ hell mit Glas und blauem Akzent.</p>
+      <p class="search-hint" id="default-theme-hint" hidden>Mit dem ⭐ wird ein Design zum Standard: für die Anmeldung und für alle ohne eigene Wahl.</p>
     </div>
     <div class="settings-card" id="sort-card">
       <h3>↕️ Sortierung der Sammlung</h3>
-      <p class="search-hint">Womit die Sammlung standardmäßig sortiert wird.
-        Die Auswahl gilt nur für dich und bleibt in deinem Profil gespeichert.</p>
+      <p class="search-hint">So ist deine Sammlung sortiert, wenn du sie öffnest.</p>
       <label for="sort-pref">Standard-Sortierung</label>
       <select id="sort-pref">
         <option value="added">Zuletzt erfasst</option>
@@ -936,8 +1036,7 @@
         <button class="mini-btn" id="btn-print-col">Sammlung drucken</button>
         <button class="mini-btn" id="btn-print-want">Wunschliste drucken</button>
       </div>
-      <p class="search-hint">CSV öffnet sich direkt in Excel/Numbers ·
-        Drucken nutzt den System-Druckdialog (auch „Als PDF sichern")</p>
+      <p class="search-hint">CSV öffnet sich in Excel oder Numbers. Drucken geht auch als PDF.</p>
     </div>
     <div class="settings-card" id="dealer-card" hidden>
       <h3>💼 Sammlerprofi</h3>
@@ -948,9 +1047,8 @@
           <span class="paid-suffix">%</span>
           <button class="mini-btn add" id="btn-offer-percent" style="flex:1;min-height:38px">Speichern</button>
         </div>
-        <p class="search-hint">Prozentsatz vom Marktwert für den roten
-          Preisvorschlag im Gesamtangebot (Standard: 60&nbsp;%).</p>
-        </div>
+        <p class="search-hint">So viel vom Marktwert schlägt Nupplo im Gesamtangebot vor (Standard: 60&nbsp;%).</p>
+      </div>
       <hr style="border:none;border-top:1.5px dashed var(--line);margin:12px 0">
       <div id="csv-import-block">
         <div class="detail-row btn-grid">
@@ -958,63 +1056,53 @@
           <button class="mini-btn" id="btn-csv-sample">Beispiel-CSV laden</button>
         </div>
         <input type="file" id="csv-file" accept=".csv,text/csv" hidden>
-        <p class="search-hint">Spalten (Reihenfolge egal, nur „Nummer" ist
-          Pflicht): Nummer;Typ;Name;Anzahl;Zustand;Bezahlt;Jahr;Notizen;Thema.
-          Preise, Bilder und Set-Inhalte holt die App automatisch nach.</p>
-        </div>
+        <p class="search-hint">Nur „Nummer“ muss drinstehen, die Reihenfolge ist egal:
+          Nummer;Typ;Name;Anzahl;Zustand;Bezahlt;Jahr;Notizen;Thema. Preise,
+          Bilder und Set-Inhalte holt Nupplo selbst nach.</p>
+      </div>
     </div>
     <div class="settings-card" id="pricelog-card" hidden>
       <h3>📈 Preis-Protokoll</h3>
-      <p class="search-hint">Wann welche Preise aufgezeichnet wurden –
-        automatisch (Hintergrundjob, alle 7 Tage je Artikel) oder manuell
-        („Preise aktualisieren"). Je Artikel höchstens ein Punkt pro
-        20 Stunden.</p>
+      <p class="search-hint">Wann welche Preise dazukamen, von selbst oder über „Preise aktualisieren“.</p>
       <p class="search-hint" id="pricelog-stale" hidden></p>
       <div id="pricelog-list" class="pricelog"></div>
       <button class="mini-btn" id="btn-pricelog-more" hidden>Mehr anzeigen</button>
     </div>
     <div class="settings-card" id="angebote-card">
       <h3>🏷 Angebotspreise</h3>
-      <p class="search-hint">Zusätzlich zu den Ø-Verkaufspreisen anzeigen,
-        <b>ab wie viel die Figur gerade zu haben ist</b>. Das sind zwei
-        verschiedene Fragen: Der Verkaufspreis sagt, was zuletzt tatsächlich
-        bezahlt wurde – also was die Figur <i>wert</i> ist. Der Angebotspreis
-        sagt, was sie <i>kostet</i>, wenn du sie jetzt kaufst. Für den
-        Flohmarkt ist meist die zweite Zahl die interessantere.</p>
-      <p class="search-hint">Beide Zahlen kommen von BrickLink. Angebote
-        werden <b>nicht gespeichert</b> – was heute zu haben ist, ist morgen
-        weg, und der Wert deiner Sammlung soll weiter auf Verkäufen beruhen.
-        Jede Abfrage kostet zusätzliche BrickLink-Abrufe; deshalb ist das
-        hier ausgeschaltet, bis du es willst.</p>
-      <label class="wahl-kasten">
+      <p class="search-hint">Zeigt neben dem Wert auch, ab wie viel eine Figur
+        gerade angeboten wird. Der Wert sagt, was zuletzt wirklich bezahlt
+        wurde, der Angebotspreis, was du heute zahlen müsstest.</p>
+      <p class="search-hint" id="angebote-quelle-hint"></p>
+      <label class="wahl-kasten" id="angebote-wahl">
         <input type="checkbox" id="opt-angebote">
         <span>Angebotspreise anzeigen</span>
       </label>
+      <label class="wahl-kasten">
+        <input type="checkbox" id="opt-brickmerge-preise">
+        <span>Angebotspreise von Brickmerge zeigen</span>
+      </label>
+      <p class="search-hint">Bei Sets: das günstigste Angebot bei Brickmerge,
+        ohne Versand, auf dem Blatt „Preise“.</p>
+      <label class="wahl-kasten">
+        <input type="checkbox" id="opt-brickmerge-bilder">
+        <span>Setbilder von Brickmerge zeigen</span>
+      </label>
+      <p class="search-hint">Weitere Bilder im Set-Steckbrief. Dein Browser
+        lädt sie direkt bei Brickmerge.</p>
     </div>
-    <div class="settings-card" id="jedipedia-card">
-      <h3>📖 Jedipedia-Verweis</h3>
-      <p class="search-hint">Bei Star-Wars-Figuren ein kleines <b>ⓘ</b> neben
-        dem Namen, das die Figur im deutschen Star-Wars-Wiki
-        (<i>jedipedia.net</i>) nachschlägt – in aller Regel direkt im
-        Artikel. „Bespin Guard" heißt dort <i>Bespin-Sicherheitskräfte</i>,
-        und steht im Namen eine Einheit, führt der Verweis dorthin
-        („Clone Trooper Commander, 187th Legion" → <i>187. Legion</i>).
-        Ein Verweis nach draußen – deshalb
-        ausgeschaltet, bis du ihn willst. Es werden keine Daten übertragen,
-        solange du ihn nicht antippst.</p>
+    <!-- Jedipedia und Bauanleitung standen bis 3.9.0 auf zwei Karten. Beide
+         sind dasselbe: ein Verweis nach draußen, aus, bis man ihn will. -->
+    <div class="settings-card" id="verweise-card">
+      <h3>🔗 Verweise nach draußen</h3>
+      <p class="search-hint">Beides ist aus, bis du es einschaltest. Es geht nichts raus, solange du nicht draufklickst.</p>
       <label class="wahl-kasten">
         <input type="checkbox" id="opt-jedipedia">
-        <span>Verweis anzeigen</span>
+        <span>Jedipedia bei Star-Wars-Figuren</span>
       </label>
-    </div>
-    <div class="settings-card" id="bauanleitung-card">
-      <h3>📘 Bauanleitungen</h3>
-      <p class="search-hint">Bei Sets ein Verweis auf die Bauanleitungen
-        bei LEGO, im Steckbrief unter „Mehr“. Für Sets ab etwa 1999 hat LEGO
-        sie fast immer, für ganz alte oft nicht. Ein Verweis nach draußen –
-        deshalb ausgeschaltet, bis du ihn willst.</p>
+      <p class="search-hint">Ein kleines <b>ⓘ</b> neben dem Namen öffnet den passenden Artikel im deutschen Star-Wars-Wiki.</p>
       <label class="wahl-kasten">
-        <span>Anzeigen</span>
+        <span>Bauanleitungen von LEGO</span>
         <select id="opt-bauanleitung">
           <option value="aus">Aus</option>
           <option value="browser">Nur in der Browseransicht</option>
@@ -1022,18 +1110,35 @@
           <option value="beide">In beiden</option>
         </select>
       </label>
+      <p class="search-hint">Steht bei Sets unter „Mehr“. Ab etwa 1999 hat LEGO fast alle.</p>
+    </div>
+    <!-- Bis 3.9.0 lag der Schalter in der Fehlerkarte, und die sehen nur
+         Admins. Dabei gilt er je Benutzer und soll gerade denen helfen, deren
+         Tab beim Scannen abstürzt. -->
+    <div class="settings-card" id="schonend-card">
+      <h3>🐢 Schonender Bildmodus</h3>
+      <p class="search-hint">Stürzt dein Browser beim Scannen ab? Dann probier
+        das hier. Fotos werden dann ohne Grafikkarte bearbeitet, etwas
+        langsamer, sonst gleich.</p>
+      <label class="wahl-kasten">
+        <input type="checkbox" id="diag-schonend">
+        <span>Schonend arbeiten</span>
+      </label>
     </div>
     <div class="settings-card" id="kat-themen-card" hidden>
       <h3>📚 Katalog-Themen</h3>
-      <p class="search-hint">Welche Themen im Katalog-Reiter zur Auswahl
-        stehen – und welche zuerst. Gilt nur für dich.</p>
+      <p class="search-hint">Welche Themen der Katalog zeigt und welche zuerst.</p>
       <div class="detail-row btn-grid">
         <button class="mini-btn" data-themenalle="nur_favoriten">★ Nur Favoriten</button>
         <button class="mini-btn" data-themenalle="alle_ein">Alle einblenden</button>
       </div>
       <div class="detail-row">
-        <input id="kat-themen-suche" type="search" placeholder="Thema suchen …"
-               autocomplete="off">
+        <span class="search-wrap">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.6-3.6"/></svg>
+          <input id="kat-themen-suche" type="search" placeholder="Thema suchen …"
+                 autocomplete="off">
+          <button type="button" class="search-clear" data-clear="kat-themen-suche" aria-label="Suche leeren">×</button>
+        </span>
         <span id="kat-themen-stand" class="kat-zahl">–</span>
       </div>
       <div id="kat-themen-liste" class="kat-themen-liste"></div>
@@ -1042,12 +1147,10 @@
 
     <section class="settings-group" id="grp-instanz">
       <h3 class="settings-group-title">🏠 Diese Instanz</h3>
-      <p class="settings-group-hint">Was für alle hier gilt. Nur für Admins sichtbar.</p>
+      <p class="settings-group-hint">Gilt für alle hier. Nur Admins sehen das.</p>
     <div id="name-card" class="settings-card" hidden>
       <h3>🏷 Anzeigename</h3>
-      <p class="search-hint">Der Name im Logo und Fenstertitel, z. B.
-        „Lukas' Nupplo". Leer lassen: Das Symbol bleibt namenlos und der
-        Titel lautet „Dein Nupplo".</p>
+      <p class="search-hint">Steht im Logo und im Fenstertitel, z. B. „Lukas' Nupplo“. Ohne Namen heißt es „Dein Nupplo“.</p>
       <label for="owner-name">Name</label>
       <input id="owner-name" maxlength="40" placeholder="ohne Namen" autocapitalize="words">
       <button id="btn-owner-name" class="btn btn-primary">Speichern</button>
@@ -1062,39 +1165,98 @@
       <button id="btn-add-user" class="btn btn-primary">Benutzer anlegen</button>
       <p id="user-error" class="error" hidden></p>
     </div>
+    <!-- Alles zu Preisen auf einer Karte (10.10.2026). Bis 3.9.0 stand die
+         Preisquelle mitten im Preisgebiet und die BrickLink-Schlüssel zwei
+         Karten weiter oben bei „API-Schlüssel“. Beide Wege bleiben: der
+         Preisdienst ohne Schlüssel und der eigene BrickLink-Zugang. -->
+    <div class="settings-card" id="price-region-card" hidden>
+      <h3>💶 Preise</h3>
+      <!-- Seit 3.9.17 keine Wahl der Quelle mehr: Der eigene Schlüssel
+           entscheidet. Mit ihm bleibt nur die Frage, wann geholt wird. -->
+      <div id="preisabruf-wahl" class="paid-row" hidden>
+        <span class="paid-label">Preise holen alle</span>
+        <input id="preisabruf-stunden" class="paid-input" inputmode="numeric"
+          style="flex:0 0 64px;width:64px">
+        <span class="paid-suffix">Stunden</span>
+        <button class="mini-btn add" id="btn-preisabruf" style="flex:1;min-height:38px">Speichern</button>
+      </div>
+      <!-- Nur in Nupplo für Windows: Tageslimit dieses Geräts und eine
+           Statuszeile (25.11.2026, wie iPhone und Mac). -->
+      <div id="geraet-limit-wahl" class="paid-row nur-desktop" hidden>
+        <span class="paid-label">Höchstens</span>
+        <input id="geraet-limit" class="paid-input" inputmode="numeric"
+          style="flex:0 0 80px;width:80px">
+        <span class="paid-suffix">Abrufe am Tag auf diesem Gerät</span>
+        <button class="mini-btn add" id="btn-geraet-limit" style="flex:1;min-height:38px">Speichern</button>
+      </div>
+      <p class="search-hint nur-desktop" id="preisabruf-status" hidden></p>
+      <p class="search-hint" id="preisquelle-hilfe"></p>
+      <p class="search-hint" id="preisquelle-status"></p>
+      <label for="price-region">Preise berechnen für</label>
+      <span class="select-wrap">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.7 2.5 15.3 0 18M12 3c-2.5 2.7-2.5 15.3 0 18"/></svg>
+        <select id="price-region"></select>
+      </span>
+      <label for="price-currency">Währung</label>
+      <span class="select-wrap"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v10M9.5 9.5h5M9.5 14.5h5"/></svg>
+        <select id="price-currency"></select>
+      </span>
+      <p class="search-hint">Gibt es im Gebiet keine Verkäufe, schaut Nupplo in der Region und dann weltweit.</p>
+      <p class="search-hint" id="price-region-status"></p>
+      <div id="price-region-run" hidden>
+        <button class="mini-btn add" id="btn-price-recalc">🔄 Preise jetzt umrechnen</button>
+      </div>
+      <p class="search-hint" id="price-missing-status" hidden></p>
+      <div id="price-missing-run" hidden>
+        <button class="mini-btn add" id="btn-price-fill">🔄 Preislose erneut abrufen</button>
+      </div>
+      <details class="help" id="bl-zugang">
+        <summary>🔑 Eigener BrickLink-Zugang</summary>
+        <p class="search-hint" id="bl-zugang-hub" hidden>Damit holt Nupplo
+          alle Preise selbst, nicht nur Star Wars und Herr der Ringe.
+          BrickLink gibt den Schlüssel nur an Shops: Eröffne dort einen Shop,
+          der darf leer bleiben. Dann kannst du ihn beantragen.</p>
+        <p class="search-hint">Vier Werte, die BrickLink dir nach der
+          Anmeldung zeigt. Gespeichertes siehst du nur gekürzt. Ein leeres
+          Feld bleibt, wie es ist.
+          <a href="https://www.bricklink.com/v2/api/register_consumer.page"
+             target="_blank" rel="noopener noreferrer">Zugang bei BrickLink beantragen ↗</a></p>
+        <label for="k-bck">Consumer Key</label>
+        <input id="k-bck" autocapitalize="none" autocomplete="off" spellcheck="false">
+        <label for="k-bcs">Consumer Secret</label>
+        <input id="k-bcs" autocapitalize="none" autocomplete="off" spellcheck="false">
+        <label for="k-bt">Token</label>
+        <input id="k-bt" autocapitalize="none" autocomplete="off" spellcheck="false">
+        <label for="k-bts">Token Secret</label>
+        <input id="k-bts" autocapitalize="none" autocomplete="off" spellcheck="false">
+        <!-- Nur mit eigenem Zugang: Die Adresse verlangen BrickLinks
+             API-Bedingungen, sonst niemand. Wer den Preisdienst nutzt,
+             braucht sie nicht und soll nicht danach gefragt werden. -->
+        <div id="kontakt-block" hidden>
+          <label for="k-kontakt">Kontaktadresse des Betreibers</label>
+          <input id="k-kontakt" type="email" autocapitalize="none" autocomplete="off"
+                 spellcheck="false" inputmode="email" placeholder="z. B. du@example.org">
+          <p class="search-hint">BrickLink verlangt sie, damit Fremde, die
+            deine Instanz nutzen, dich erreichen. Läuft Nupplo nur für dich
+            und deine Familie, lass das Feld leer. Sie steht dann unter
+            „Quellen &amp; Rechtliches“ und geht nirgendwohin.</p>
+        </div>
+        <div class="detail-row">
+          <button id="btn-save-bl" class="mini-btn add">Speichern</button>
+          <button id="btn-test-bl" class="mini-btn">Verbindung testen</button>
+        </div>
+        <p id="bl-status" class="search-hint" hidden></p>
+      </details>
+    </div>
     <div id="api-panel" class="settings-card" hidden>
-      <h3>🔑 API-Schlüssel</h3>
-      <p class="search-hint">Gespeicherte Schlüssel werden maskiert angezeigt.
-        Feld leer lassen = Wert bleibt unverändert.
-        Woher die Schlüssel kommen, steht in der Hilfe (❓ oben rechts)
-        unter <b>API-Schlüssel besorgen</b>.</p>
-      <label for="k-rb">Rebrickable Key (Namenssuche)</label>
+      <h3>🔎 Katalogsuche (Rebrickable)</h3>
+      <p class="search-hint">Freiwillig. Figuren aus dem Katalog findest du
+        auch so. Mit einem kostenlosen Schlüssel von Rebrickable kommen Sets,
+        Teile und ganz neue Figuren dazu.
+        <a href="https://rebrickable.com/api/" target="_blank"
+           rel="noopener noreferrer">Schlüssel holen ↗</a></p>
+      <label for="k-rb">Rebrickable-Schlüssel</label>
       <input id="k-rb" autocapitalize="none" autocomplete="off" spellcheck="false">
-      <label for="k-bck">BrickLink Consumer Key</label>
-      <input id="k-bck" autocapitalize="none" autocomplete="off" spellcheck="false">
-      <label for="k-bcs">BrickLink Consumer Secret</label>
-      <input id="k-bcs" autocapitalize="none" autocomplete="off" spellcheck="false">
-      <label for="k-bt">BrickLink Token</label>
-      <input id="k-bt" autocapitalize="none" autocomplete="off" spellcheck="false">
-      <label for="k-bts">BrickLink Token Secret</label>
-      <input id="k-bts" autocapitalize="none" autocomplete="off" spellcheck="false">
-      <label for="k-kontakt">Kontaktadresse des Betreibers</label>
-      <input id="k-kontakt" type="email" autocapitalize="none" autocomplete="off"
-             spellcheck="false" inputmode="email" placeholder="z. B. du@example.org">
-      <p class="search-hint">BrickLinks Nutzungsbedingungen verlangen eine
-        sichtbare Kontaktadresse in der Anwendung – <b>nicht für BrickLink</b>,
-        die kennen dich aus der Registrierung, sondern damit <b>Fremde, die
-        deine Instanz benutzen</b>, dich erreichen können.</p>
-      <p class="search-hint"><b>Läuft diese Instanz nur für dich und deine
-        Familie, lass das Feld leer.</b> Wer ohnehin am Küchentisch fragen
-        kann, braucht keine E-Mail-Adresse auf einer Seite. Gemeint sind
-        Leute, die du nicht kennst: wenn du einen Zugang an jemanden außerhalb
-        des Haushalts gibst oder die Instanz öffentlich erreichbar machst.</p>
-      <p class="search-hint">Was hier steht, erscheint unten unter
-        <b>Quellen &amp; Rechtliches</b> und wird <b>nirgendwohin
-        übertragen</b>. Anders als die Schlüssel wird das Feld nicht maskiert:
-        Es wird beim Speichern genau so übernommen, und leeren heißt
-        löschen.</p>
       <div class="detail-row">
         <button id="btn-save-keys" class="mini-btn add">Speichern</button>
         <button id="btn-test-keys" class="mini-btn">Verbindung testen</button>
@@ -1103,17 +1265,18 @@
     </div>
     <div id="ollama-panel" class="settings-card" hidden>
       <h3>🤖 Lokale KI für die Suche</h3>
-      <p class="search-hint">Optional. Die Namen in der Sammlung kommen von
-        BrickLink und sind <b>englisch</b> – „Ritter“ findet deshalb nichts,
-        obwohl die Figur als „Knight“ dasteht. Ist hier ein
+      <p class="search-hint">Freiwillig. Die Namen im Katalog sind englisch,
+        „Ritter“ findet also keinen „Knight“. Das eingebaute Wörterbuch hilft
+        schon. Eine lokale KI über
         <a href="https://ollama.com" target="_blank" rel="noopener">Ollama</a>
-        hinterlegt, übersetzt es erfolglose Suchbegriffe ins Englische und
-        sucht damit erneut. Gefunden wird weiterhin <b>nur in der eigenen
-        Datenbank</b>: Die KI liefert Suchbegriffe, keine Ergebnisse.
-        Ohne Adresse bleibt alles wie bisher.</p>
+        übersetzt zusätzlich, was es nicht kennt. Gesucht wird trotzdem nur
+        in deiner Sammlung und deinem Katalog.</p>
       <label for="ollama-url">Adresse (z. B. http://192.168.0.10:11434)</label>
       <input id="ollama-url" autocapitalize="none" autocomplete="off"
              spellcheck="false" inputmode="url" placeholder="leer = aus">
+      <!-- Modell und Test erst mit Adresse: Ohne gibt es nichts zu wählen
+           und nichts zu testen. -->
+      <div id="ollama-mehr" hidden>
       <label for="ollama-model">Modell</label>
       <!-- Die Liste kommt vom Server. Schweigt er, bleibt sie verborgen und
            das Textfeld darunter übernimmt – wer den Namen kennt, soll ihn
@@ -1124,17 +1287,15 @@
       <div class="detail-row">
         <button id="btn-reload-models" class="mini-btn">Modelle laden</button>
       </div>
+      </div>
       <div class="detail-row">
         <button id="btn-save-ollama" class="mini-btn add">Speichern</button>
-        <button id="btn-test-ollama" class="mini-btn">Verbindung testen</button>
+        <button id="btn-test-ollama" class="mini-btn" hidden>Verbindung testen</button>
       </div>
       <p id="ollama-status" class="search-hint" hidden></p>
-
       <h4>📖 Gelernte Begriffe</h4>
-      <p class="search-hint">Was die Suche gelernt hat – und was du ihr
-        beibringst. Eigene Zeilen haben Vorrang vor der KI und gelten auch
-        ohne sie. Nützlich, wenn du etwas anders nennst als der Katalog:
-        <code>roter c3po → R-3PO</code>.</p>
+      <p class="search-hint">Was die Suche gelernt hat. Eigene Einträge gehen
+        vor und wirken auch ohne KI, etwa <code>roter c3po → R-3PO</code>.</p>
       <!-- Hier steht nur die Bilanz. Die Liste wächst mit jedem Suchlauf und
            würde die Einstellungen sonst unbenutzbar machen; sie hat ein
            eigenes Fenster mit Suche. -->
@@ -1145,90 +1306,51 @@
     </div>
     <!-- Bis 3.4.2 stand der Abzug unten in der KI-Karte – dort sucht ihn
          niemand, er hat mit der KI nichts zu tun. -->
+    <!-- Bis 3.9.10 hieß es hier „Namen stehen nicht darin“, dazu zwei
+         BrickLink-Knöpfe für alle. Seitdem bringt der Katalog Sets mit Name,
+         Thema und Jahr, deutsche Setnamen und die Teile jeder Figur selbst
+         mit. Offen bleiben nur die Figurennamen: Die sind BrickLinks Inhalt
+         und dürfen nicht mitgeliefert werden. Deshalb stehen die
+         BrickLink-Wege nur noch da, wenn sie etwas nachzuholen haben. -->
     <div id="katalog-card" class="settings-card" hidden>
       <h3>📚 Katalog-Abzug</h3>
-      <p class="search-hint">Der Abzug macht die Suche nach dem Aussehen
-        möglich – „roter Protokolldroide mit schwarzem Aufdruck" findet
-        <code>R-3PO Protocol Droid</code>, wofür sonst kein Weg führt: Der
-        Katalog von Rebrickable nennt sie nur <code>R-3PO</code>.</p>
-      <p class="search-hint"><b>Erzeugt wird er nicht hier.</b> Er wird als
-        Datei veröffentlicht und alle zwölf Stunden abgeholt – darin stehen
-        die BrickLink-Nummer und eine Beschreibung dessen, was auf dem
-        Katalogfoto zu sehen ist. Namen stehen <b>nicht</b> darin; die
-        schlägt diese Instanz über ihren <b>eigenen</b> BrickLink-Zugang
-        nach, gedrosselt im Hintergrund.</p>
-      <p class="search-hint"><b>Er kostet etwas.</b> Gut 6 MB, wenn er sich
-        geändert hat, und beim ersten Mal rund 19.000 BrickLink-Abrufe für
-        die Namen – verteilt über mehrere Tage, damit den Preisen genug
-        Kontingent bleibt. Wer die Suche nach dem Aussehen nicht braucht,
-        schaltet ihn hier ab.</p>
+      <p class="search-hint">Damit findest du Figuren auch nach dem Aussehen:
+        „roter Protokolldroide“ findet <code>R-3PO</code>. Dazu kommen die
+        Teile jeder Figur und bei Sets Name, Thema, Jahr, Teile und Figuren.
+        Nupplo holt alles alle zwölf Stunden, wenn sich etwas geändert hat.</p>
       <label class="share-toggle">
         <input type="checkbox" id="katalog-aktiv">
-        Abzug holen und Namen nachschlagen
+        Katalog-Abzug holen
       </label>
       <div class="detail-row">
         <span id="katalog-stand" class="search-hint"></span>
       </div>
-      <p class="search-hint"><b>Namen in Sekunden statt in Tagen.</b>
-        BrickLink bietet seinen Katalog jedem Mitglied zum Herunterladen an
-        (<i>My Account → Downloads → Catalog Items</i>). Wähle dort
-        <b>Item Type: Minifigures</b> oder <b>Sets</b> und Format XML –
-        beide werden eingelesen, Teile und Zubehör nicht. Nach dem Einlesen
-        stehen alle Namen sofort da, statt über Tage einzeln abgerufen
-        zu werden. Kostet kein Kontingent, und die Beschreibungen bleiben
-        erhalten.</p>
-      <div class="detail-row">
-        <input type="file" id="katalog-datei" accept=".xml,.gz"
-               style="display:none">
-        <button id="btn-katalog-datei" class="mini-btn">Katalogdatei einlesen</button>
-        <span id="katalog-datei-stand" class="search-hint"></span>
+      <p class="search-hint" id="katalog-mitgeliefert" hidden></p>
+      <div id="katalog-namen-block" hidden>
+        <p class="search-hint" id="katalog-namen-satz"></p>
+        <p class="search-hint" id="katalog-namen-weg"></p>
+        <div class="detail-row">
+          <input type="file" id="katalog-datei" accept=".xml,.gz"
+                 style="display:none">
+          <button id="btn-katalog-datei" class="mini-btn">Katalogdatei einlesen</button>
+          <span id="katalog-datei-stand" class="search-hint"></span>
+        </div>
       </div>
-      <p class="search-hint"><b>Für Sets zusätzlich die Kategorien.</b>
-        Figuren tragen ihr Thema in der Nummer – <i>sw</i> ist Star Wars.
-        Sets nicht: <i>75192-1</i> sagt nichts. Deren Thema steht nur in der
-        BrickLink-Kategorie, und die kommt als Nummer. Ein einziger Abruf
-        holt den Kategoriebaum; ohne ihn stehen Sets in der Katalogliste
-        ohne Thema da.</p>
-      <div class="detail-row">
-        <button id="btn-katalog-kategorien" class="mini-btn">Kategorien holen</button>
-        <span id="katalog-kategorien-stand" class="search-hint"></span>
-      </div>
-    </div>
-    <div class="settings-card" id="price-region-card" hidden>
-      <h3>🌍 Preisgebiet</h3>
-      <p class="search-hint">Aus welchem Markt sollen die
-        BrickLink-Ø-Preise stammen, und in welcher Währung? Gibt es im
-        gewählten Gebiet zu einem Artikel keine Verkäufe, weitet die App
-        automatisch aus – erst auf die zugehörige Region, dann weltweit –,
-        sonst stünden seltenere Figuren ohne Preis da. Nach einer Umstellung
-        müssen die gespeicherten Preise einmal neu geholt werden.</p>
-      <label for="price-region">Preise berechnen für</label>
-      <span class="select-wrap">
-        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.7 2.5 15.3 0 18M12 3c-2.5 2.7-2.5 15.3 0 18"/></svg>
-        <select id="price-region"></select>
-      </span>
-      <label for="price-currency">Währung</label>
-      <span class="select-wrap"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v10M9.5 9.5h5M9.5 14.5h5"/></svg>
-        <select id="price-currency"></select>
-      </span>
-      <p class="search-hint" id="price-region-status"></p>
-      <div id="price-region-run" hidden>
-        <button class="mini-btn add" id="btn-price-recalc">🔄 Preise jetzt umrechnen</button>
-      </div>
-      <p class="search-hint" id="price-missing-status" hidden></p>
-      <div id="price-missing-run" hidden>
-        <button class="mini-btn add" id="btn-price-fill">🔄 Preislose erneut abrufen</button>
+      <div id="katalog-kategorien-block" hidden>
+        <p class="search-hint">Ein paar Sets aus BrickLinks Datei kennen ihr
+          Thema noch nicht. Ein einziger Abruf bei BrickLink holt es.</p>
+        <div class="detail-row">
+          <button id="btn-katalog-kategorien" class="mini-btn">Kategorien holen</button>
+          <span id="katalog-kategorien-stand" class="search-hint"></span>
+        </div>
       </div>
     </div>
     <div class="settings-card" id="images-card" hidden>
       <h3>🖼 Bilder auf der Instanz</h3>
-      <p class="search-hint">Gespeichert ist zu jedem Artikel nur die Adresse
-        seines Katalogbildes – geholt hat es bisher dein Browser direkt bei
-        BrickLink, Rebrickable oder Brickognize. Aus der Sammlung ging dabei
-        nichts nach außen, aber die Bildadresse nennt die Teilenummer. Wer
-        die Bilder einmal hierher holt, beendet auch das: Danach fragt der
-        Browser nur noch die eigene Instanz. Neue Artikel bringen ihr Bild
-        von selbst mit; der Knopf holt den Bestand nach.</p>
+      <p class="search-hint">Bisher lädt dein Browser die Katalogbilder bei
+        BrickLink, Rebrickable oder Brickognize. Holst du sie einmal hierher,
+        fragt er nur noch deine Instanz. Neue Artikel bringen ihr Bild selbst
+        mit.</p>
       <p class="search-hint" id="images-status"></p>
       <button class="mini-btn add" id="btn-images-fetch" hidden>🖼 Bilder jetzt holen</button>
     </div>
@@ -1236,69 +1358,175 @@
 
     <section class="settings-group" id="grp-aussen">
       <h3 class="settings-group-title">🌐 Nach außen</h3>
-      <p class="settings-group-hint">Wege aus dem Heimnetz heraus – alle freiwillig.</p>
+      <p class="settings-group-hint">Wege aus dem Heimnetz. Alle freiwillig.</p>
+    <!-- Nur in Nupplo für Windows: Abgleich der Sammlung hier, wie auf
+         iPhone und Mac. Der Block zieht für den Assistenten um (siehe
+         `abgleichBlockUmziehen`), eine Oberfläche, nicht zwei. -->
+    <div class="settings-card nur-desktop" id="abgleich-card">
+      <h3>🔄 Abgleich</h3>
+      <div id="abgleich-heimat"><div id="abgleich-block">
+      <p class="search-hint">Deine Sammlung liegt auf diesem Rechner. Wenn du
+        willst, gleicht Nupplo sie mit deinen anderen Geräten ab.</p>
+      <label class="wahl-kasten">
+        <input type="radio" name="abgleich-weg" value="aus">
+        <span><b>Nur auf diesem Rechner.</b></span>
+      </label>
+      <label class="wahl-kasten">
+        <input type="radio" name="abgleich-weg" value="wolke">
+        <span><b>Über einen eigenen Cloud-Ordner.</b> Google Drive, iCloud
+          Drive oder ein anderer. Ohne Nupplo-Server.</span>
+      </label>
+      <label class="wahl-kasten">
+        <input type="radio" name="abgleich-weg" value="se">
+        <span><b>Mit meiner Nupplo SE.</b> Zu Hause direkt, unterwegs über
+          Nupplo Connect.</span>
+      </label>
+      <div id="abgleich-se" hidden>
+        <label for="abgleich-adresse">Adresse deiner Nupplo SE</label>
+        <input id="abgleich-adresse" placeholder="http://192.168.0.10:8300" autocapitalize="none">
+        <label for="abgleich-benutzer">Benutzername dort</label>
+        <input id="abgleich-benutzer" autocapitalize="none" autocomplete="off">
+        <label for="abgleich-passwort">Passwort dort</label>
+        <input id="abgleich-passwort" type="password" autocomplete="off">
+        <div id="abgleich-code-zeile" hidden>
+          <label for="abgleich-code">Code aus der Authenticator-App</label>
+          <input id="abgleich-code" inputmode="numeric" maxlength="10" placeholder="123456">
+        </div>
+        <button id="btn-abgleich-verbinden" class="btn btn-primary">Verbinden</button>
+      </div>
+      <div id="abgleich-wolke" hidden>
+        <div id="ordner-google" hidden>
+          <p class="search-hint">Am einfachsten über Google Drive – so gleichen
+            auch Android-Telefone ab. Nupplo sieht dort nur seinen eigenen
+            Ordner, und die Pakete darin sind verschlüsselt: Google kann sie
+            nicht lesen.</p>
+          <button id="btn-google-verbinden" class="btn btn-primary">Mit Google Drive verbinden</button>
+          <p class="search-hint" id="google-warten" hidden>Bitte im Browser bei
+            Google anmelden und Nupplo erlauben. <a id="google-link" href="#"
+            target="_blank" rel="noopener">Browser hat sich nicht geöffnet?</a></p>
+          <p class="search-hint">Oder einen Ordner auf diesem Rechner, den ein
+            Cloud-Programm abgleicht (OneDrive, Dropbox, iCloud für Windows):</p>
+        </div>
+        <p class="search-hint" id="ordner-erklaerung">Wähle einen Ordner, den dein Cloud-Dienst
+          abgleicht. Jedes Gerät legt dort verschlüsselte Pakete ab; lesen
+          können sie nur deine Geräte.</p>
+        <label for="ordner-pfad">Ordner</label>
+        <input id="ordner-pfad" placeholder="C:\Users\…\OneDrive" autocapitalize="none" spellcheck="false">
+        <button id="btn-ordner-waehlen" class="btn btn-outline" hidden>Ordner wählen …</button>
+        <div id="ordner-vorschlaege" class="ordner-vorschlaege" hidden></div>
+        <button id="btn-ordner-pruefen" class="btn btn-primary">Weiter</button>
+        <div id="ordner-anlegen" hidden>
+          <p class="search-hint">In diesem Ordner gibt es noch keinen Abgleich.
+            Dieses Gerät legt ihn an und zeigt dir danach einen Code für
+            deine anderen Geräte.</p>
+          <button id="btn-ordner-anlegen" class="btn btn-primary">Hier anlegen</button>
+        </div>
+        <div id="ordner-beitreten" hidden>
+          <p class="search-hint" id="ordner-gefunden"></p>
+          <label for="ordner-code">Code von deinem anderen Gerät</label>
+          <input id="ordner-code" autocapitalize="characters" autocomplete="off" spellcheck="false">
+          <div id="ordner-ersetzen-wahl" hidden>
+            <label class="wahl-kasten">
+              <input type="radio" name="ordner-ersetzen" value="0" checked>
+              <span><b>Zusammenlegen.</b> Was hier liegt, kommt dazu. Gleiche
+                Figuren werden zusammengezählt.</span>
+            </label>
+            <label class="wahl-kasten">
+              <input type="radio" name="ordner-ersetzen" value="1">
+              <span><b>Sammlung hier ersetzen.</b> Was hier liegt, wird durch
+                die Sammlung im Ordner ersetzt.</span>
+            </label>
+          </div>
+          <button id="btn-ordner-beitreten" class="btn btn-primary">Beitreten</button>
+        </div>
+      </div>
+      <div id="ordner-verbunden" hidden>
+        <p><strong id="ordner-wo"></strong></p>
+        <p class="search-hint" id="ordner-stand" aria-live="polite"></p>
+        <div id="ordner-code-kasten" hidden>
+          <p class="search-hint">Auf jedem weiteren Gerät denselben Ordner
+            wählen und diesen Code eingeben oder abscannen. Wer ihn hat, kann
+            deine Sammlung lesen.</p>
+          <div id="ordner-qr" class="tfa-qr"></div>
+          <p><code id="ordner-code-text"></code></p>
+          <button id="btn-ordner-code-kopieren" class="btn btn-outline">Code kopieren</button>
+        </div>
+        <button id="btn-ordner-code" class="btn btn-outline">Code für weitere Geräte</button>
+        <button id="btn-ordner-jetzt" class="btn btn-outline">Jetzt abgleichen</button>
+        <button id="btn-ordner-trennen" class="btn btn-outline">Abgleich ausschalten</button>
+      </div>
+      <div id="abgleich-verbunden" hidden>
+        <p id="abgleich-instanz"><strong></strong></p>
+        <p class="search-hint" id="abgleich-stand" aria-live="polite"></p>
+        <p class="search-hint" id="abgleich-unterwegs"></p>
+        <button id="btn-abgleich-jetzt" class="btn btn-outline">Jetzt abgleichen</button>
+        <button id="btn-abgleich-trennen" class="btn btn-outline">Abgleich ausschalten</button>
+      </div>
+      <p id="abgleich-fehler" class="error" hidden></p>
+      </div></div>
+    </div>
     <div class="settings-card" id="connect-card" hidden>
       <h3>📡 Zugriff ohne Portfreigabe</h3>
-      <p class="search-hint">Nupplo SE hält von sich aus eine Verbindung zu
-        einem Vermittler offen (<code>connect.nupplo.com</code>). Am Router
-        muss nichts freigegeben werden, und es braucht weder Domain noch
-        Tunnel. Geräte koppelst du einmal per QR-Code – im Profil unter
-        „Geräte koppeln“.</p>
-      <p class="search-hint"><b>Ende zu Ende verschlüsselt:</b> Der Vermittler
-        reicht nur durch und kann nichts lesen. Und nur gekoppelte Geräte
-        kommen überhaupt bis zur Anmeldung – ein Fremder sieht nicht einmal
-        die Anmeldeseite.</p>
+      <p class="search-hint">Nupplo von unterwegs, ohne etwas am Router
+        freizugeben. Dafür hält Nupplo eine Verbindung zu
+        <code>connect.nupplo.com</code>, Ende zu Ende verschlüsselt: Der
+        Vermittler kann nichts lesen. Geräte koppelst du einmal per QR-Code,
+        im Profil unter „Geräte koppeln“.</p>
       <label class="wahl-kasten">
         <input type="checkbox" id="connect-an">
         <span>Zugriff ohne Portfreigabe einschalten</span>
       </label>
-      <label class="wahl-kasten">
-        <input type="checkbox" id="connect-2fa">
-        <span>Nur mit zweitem Faktor</span>
-      </label>
-      <p class="search-hint">Dann kommt über diesen Weg nur herein, wer die
-        Zwei-Faktor-Anmeldung eingerichtet hat – bei jeder Anfrage geprüft,
-        auch für Geräte, die sich zu Hause angemeldet haben. Im Heimnetz
-        ändert sich nichts.</p>
+      <!-- Nur bei eingeschaltetem Zugang: Ausgeschaltet regelt der Schalter
+           nichts, sah aber aus wie eine zweite, eigene Sperre. -->
+      <div id="connect-2fa-block" hidden>
+        <label class="wahl-kasten">
+          <input type="checkbox" id="connect-2fa">
+          <span>Nur mit zweitem Faktor</span>
+        </label>
+        <p class="search-hint">Dann kommt auf diesem Weg nur rein, wer die
+          Zwei-Faktor-Anmeldung eingerichtet hat. Zu Hause ändert sich nichts.</p>
+      </div>
       <p class="search-hint" id="connect-stand" aria-live="polite"></p>
       <p class="search-hint" id="connect-id-zeile" hidden>Instanz-ID:
         <code id="connect-id"></code> – solange der Dienst im Aufbau ist, muss
         sie beim Vermittler freigeschaltet sein.</p>
     </div>
     <div class="settings-card" id="external-access-card" hidden>
-      <h3>🌐 Externer Zugriff</h3>
-      <p class="search-hint">Von unterwegs auf Nupplo zugreifen – ohne
-        Portfreigabe, per <b>Cloudflare Tunnel</b>. Trage Adresse und
-        Tunnel-Token ein; die App baut dir daraus den fertigen
-        <code>docker-compose</code>-Block. <b>Der Token bleibt im Browser</b>
-        und wird nicht gespeichert oder verschickt.</p>
+      <h3>🌐 Eigener Cloudflare-Tunnel</h3>
+      <p class="search-hint">Für Fortgeschrittene, einfacher geht es mit
+        „Zugriff ohne Portfreigabe“. Trag Adresse und Tunnel-Token ein,
+        Nupplo baut dir den <code>docker-compose</code>-Block. Der Token
+        bleibt in deinem Browser.</p>
       <label for="cf-host">Adresse (Public Hostname)</label>
       <input id="cf-host" placeholder="nupplo.deine-domain.de" autocapitalize="none">
       <label for="cf-token">Cloudflare Tunnel-Token</label>
       <input id="cf-token" placeholder="eyJhIjoi…" autocapitalize="none">
-      <p class="search-hint">Token im <b>Cloudflare Zero Trust</b>-Dashboard
-        unter <i>Networks → Tunnels</i> beim Anlegen kopieren. Als
-        <i>Public Hostname</i> dort <code>http://nupplo:8300</code> als
-        Service eintragen.</p>
+      <p class="search-hint">Den Token gibt es im Cloudflare-Zero-Trust-Dashboard
+        unter <i>Networks → Tunnels</i>. Als Service trägst du dort
+        <code>http://nupplo:8300</code> ein.</p>
+      <!-- Der Block erst, wenn Adresse und Token drinstehen: Mit Platzhaltern
+         kopiert, startet der Tunnel nicht, und der Fehler zeigt sich erst
+         auf dem Server. -->
+      <div id="cf-ergebnis" hidden>
       <label>Diesen Block in die <code>docker-compose.yml</code> ergänzen:</label>
       <pre class="code-block" id="cf-snippet" aria-live="polite"></pre>
       <div class="detail-row btn-grid">
         <button class="mini-btn add" id="cf-copy">📋 Block kopieren</button>
       </div>
-      <p class="search-hint">Danach <code>docker compose up -d</code>. Deine App
-        ist dann unter <b id="cf-url">https://…</b> erreichbar. Ausführlich:
-        Handbuch, Kapitel 2.7. <b>Extra-Schloss:</b> im Zero-Trust-Dashboard
-        optional eine Access-Policy davorsetzen.</p>
+      <!-- Die Adresse steht in einer eigenen Zeile: Das Skript setzt sie beim
+           Tippen ein, und ein Satz mit wechselndem Inhalt passt nie auf
+           seinen Übersetzungsschlüssel – er blieb auf Englisch deutsch. -->
+      <p class="search-hint">Danach <code>docker compose up -d</code>. Mehr
+        im Handbuch, Kapitel 2.7.</p>
+      <p class="search-hint">Erreichbar unter: <b id="cf-url">https://…</b></p>
+      </div>
     </div>
     <div class="settings-card" id="hub-card" hidden>
       <h3>🤝 Tausch-Netzwerk</h3>
-      <p class="search-hint">Das Tausch-Netzwerk verbindet Sammler
-        untereinander – nur mit Einladung. Geteilt wird nur, was du dafür
-        auswählst: deine Angebote, dein Profil und, wenn du willst, deine
-        Wunschliste. Deine Sammlung selbst bleibt auf deinem Server.
-        Entdecken, Angebote und Nachrichten findest du danach im
-        <b>Tausch</b>-Tab.</p>
-
+      <p class="search-hint">Tauschen mit anderen Sammlern, nur auf
+        Einladung. Geteilt wird nur, was du freigibst: Angebote, Profil und
+        auf Wunsch die Wunschliste. Deine Sammlung bleibt hier. Für den
+        Preisdienst musst du nicht beitreten.</p>
       <div id="hub-connect-box">
         <p class="search-hint">Netzwerk: <b id="hub-url-line"></b></p>
         <p class="search-hint">Zum Mitmachen brauchst du einen
@@ -1317,12 +1545,11 @@
           <span id="hub-inst-gesperrt-grund"></span>
           <div id="hub-inst-stellung"></div></div>
       </div>
-
       <div id="hub-connected-box" hidden>
         <p class="sub">Verbunden als <b id="hub-member-name"></b>
           <span id="hub-admin-badge" hidden>· 👑 Hub-Admin</span></p>
-        <p class="search-hint">Einladungen und Angebote im <b>Tausch</b>-Tab.
-          Mitglieder verwalten geht in der Admin-Konsole.</p>
+        <p class="search-hint">Einladungen und Angebote findest du im
+          <b>Tausch</b>-Tab, Mitglieder in der Admin-Konsole.</p>
         <div class="detail-row btn-grid">
           <button class="mini-btn danger" id="hub-disconnect">Aus dem Netzwerk abmelden</button>
         </div>
@@ -1345,18 +1572,17 @@
         <span>🖼 <b>Eigene Bilder mitsichern.</b>
           <span id="backup-bilder-info"></span></span>
       </label>
-      <p class="search-hint">Enthält alles: Benutzer, Sammlung, Wünsche,
-        Preisverläufe, Set-Zuordnungen und Einstellungen.</p>
-      <p class="search-hint" id="backup-auto-info">Zusätzlich sichert
-        Nupplo die Datenbank täglich von selbst nach
-        <code>data/backups/</code>.</p>
+      <p class="search-hint">Die Sicherung enthält alles: Benutzer, Sammlung,
+        Wünsche, Preise und Einstellungen.</p>
+      <p class="search-hint" id="backup-auto-info">Dazu sichert Nupplo jeden
+        Tag von selbst nach <code>data/backups/</code>.</p>
       <div id="backup-restore-block" hidden>
         <label for="backup-select">Automatischen Tagesstand wiederherstellen</label>
         <div class="detail-row btn-grid">
           <select id="backup-select" style="grid-column:1/-1"></select>
           <button class="mini-btn" id="btn-backup-dl">⬇ Herunterladen</button>
           <button class="mini-btn danger" id="btn-restore-snap"
-            style="grid-column:auto">↩︎ Wiederherstellen</button>
+                  style="grid-column:auto">↩︎ Wiederherstellen</button>
         </div>
       </div>
     </div>
@@ -1368,19 +1594,18 @@
         <p class="update-banner">⬆️ Update <b id="ver-latest"></b> verfügbar!
           <a id="ver-url" href="#" target="_blank" rel="noopener">Release-Notes ansehen</a></p>
         <div id="update-run" hidden>
-          <p class="search-hint">Direkt einspielen – die App sperrt sich
-            währenddessen für alle und lädt danach neu:</p>
+          <p class="search-hint">Direkt einspielen. Nupplo ist dabei kurz für
+            alle gesperrt und lädt danach neu:</p>
           <div class="detail-row btn-grid">
             <button class="mini-btn add" data-update-go="0">Jetzt</button>
             <button class="mini-btn add" data-update-go="60">In 1 Minute</button>
             <button class="mini-btn add" data-update-go="300">In 5 Minuten</button>
           </div>
         </div>
-        <p class="search-hint">Von Hand auf dem Server:</p>
+        <p class="search-hint">Oder von Hand auf dem Server, im Ordner mit der
+          <code>docker-compose.yml</code>:</p>
         <pre class="update-cmd">cd /pfad/zu/nupplo
 sudo bash update.sh</pre>
-        <p class="search-hint">…im Nupplo-Ordner auf dem Server (dort,
-          wo die docker-compose.yml liegt).</p>
       </div>
       <!-- Status des Update-Helfers: immer sichtbar, damit sich die
            Einrichtung auch ohne anstehendes Update prüfen lässt. -->
@@ -1392,9 +1617,8 @@ sudo bash update.sh</pre>
     </div>
     <div class="settings-card" id="errors-card" hidden>
       <h3>🐞 Fehlerbericht</h3>
-      <p class="search-hint">Tritt in der App ein Fehler auf, landet er hier –
-        auch von den Geräten der anderen. Gleichartige Fehler werden
-        zusammengefasst.</p>
+      <p class="search-hint">Fehler aus der App landen hier, auch von den
+        Geräten der anderen. Gleiche Fehler werden zusammengefasst.</p>
       <div id="errors-list"></div>
       <div class="detail-row btn-grid" style="margin-top:8px">
         <button class="mini-btn" id="btn-errors-copy">📋 Bericht kopieren</button>
@@ -1402,28 +1626,13 @@ sudo bash update.sh</pre>
       </div>
       <div class="diag-box" id="diag-box">
         <p class="search-hint" style="margin:0 0 6px"><b>🩺 Speicher-Verlauf.</b>
-          Alle 30 Sekunden ein Messwert, gespeichert im Browser – und zwar
-          so, dass er einen Absturz des Tabs übersteht. Bricht der Browser die
-          Seite ab („Auf dieser Seite gibt es ein Problem"), steht hier
-          hinterher, was kurz davor los war. Nur auf diesem Gerät, nichts geht
-          nach außen.</p>
-        <p class="search-hint" style="margin:0 0 6px"><b>Kurve flach, Tab
-          trotzdem tot?</b> Dann liegt es nicht an der App. Der wahre Grund
-          steht in der Absturzliste des Browsers: <code>edge://crashes</code>
-          bzw. <code>chrome://crashes</code>. Tragen die Einträge dort
-          dieselbe <b>Bucket-ID</b>, ist es immer derselbe Fehler des
-          Browsers – dann hilft nur: Browser aktualisieren,
-          Hardwarebeschleunigung abschalten, einen Eintrag melden.</p>
-        <label class="wahl-kasten">
-          <input type="checkbox" id="diag-schonend">
-          <span>🐢 <b>Schonender Bildmodus.</b> Diese App entpackt Fotos,
-            malt sie auf Zeichenflächen und liest Bildpunkte aus – Arbeit,
-            die der Browser gern auf die Grafikeinheit schiebt und die kaum
-            eine andere Seite ihm gibt. Bricht dein Tab beim Scannen ab,
-            probier diesen Modus: Er geht denselben Weg zu Fuß, im
-            Hauptspeicher. Etwas langsamer, sonst gleich.</span>
-        </label>
-
+          Alle 30 Sekunden ein Messwert, gespeichert in diesem Browser. Stürzt
+          der Tab ab, siehst du hier, was kurz davor los war.</p>
+        <p class="search-hint" style="margin:0 0 6px"><b>Kurve flach und der
+          Tab trotzdem weg?</b> Dann liegt es am Browser. Schau in
+          <code>edge://crashes</code> bzw. <code>chrome://crashes</code>.
+          Tragen die Einträge dieselbe <b>Bucket-ID</b>, hilft meist: Browser
+          aktualisieren oder die Hardwarebeschleunigung abschalten.</p>
         <p class="search-hint" id="diag-summary"></p>
         <div id="diag-chart"></div>
         <div class="detail-row btn-grid" style="margin-top:8px">
@@ -1435,8 +1644,7 @@ sudo bash update.sh</pre>
              lädt nur dazu ein, ihn versehentlich zu drücken. -->
         <div id="diag-send-box" hidden>
           <p class="search-hint" style="margin:10px 0 6px"><b>🐞 Diesen
-            Absturz melden.</b> Der Bericht hilft, ein Muster zu erkennen –
-            gerade wenn er von mehreren Geräten kommt. Du siehst vorher
+            Absturz melden.</b> Hilft, ein Muster zu finden. Du siehst vorher
             genau, was rausgeht.</p>
           <div class="detail-row btn-grid">
             <button class="mini-btn add" id="btn-diag-send">🐞 Fehlerbericht
@@ -1444,14 +1652,11 @@ sudo bash update.sh</pre>
           </div>
         </div>
       </div>
-
       <div id="push-box" class="push-box" hidden>
         <p class="search-hint" style="margin:0 0 6px"><b>🔔 Benachrichtigung
-          aufs Gerät.</b> Damit erfährst du von einem Fehler auch, wenn
-          Nupplo gerade zu ist. Die Meldung kommt von <b>deinem eigenen
-          Server</b> und sagt nur, <i>dass</i> etwas passiert ist –
-          Einzelheiten stehen hier in der App. Je Gerät einzeln
-          einzuschalten.</p>
+          aufs Gerät.</b> So erfährst du von Fehlern, auch wenn Nupplo zu ist.
+          Die Meldung kommt von deinem eigenen Server. Für jedes Gerät einzeln
+          einschalten.</p>
         <p class="search-hint" id="push-state"></p>
         <div class="detail-row btn-grid">
           <button class="mini-btn add" id="btn-push-on">🔔 Auf diesem Gerät einschalten</button>
@@ -1460,19 +1665,16 @@ sudo bash update.sh</pre>
         </div>
         <p class="search-hint" id="push-out" hidden></p>
       </div>
-
       <details class="help" style="margin-top:12px">
         <summary>GitHub-Token für automatische Issues</summary>
-        <p class="search-hint">Mit einem Token kann die App aus einem Fehler
-          direkt ein Issue anlegen. Nutze einen <b>fein granulierten</b> Token
-          (Fine-grained), der <b>nur dieses Repository</b> und dort <b>nur
-          „Issues: Read and write"</b> darf – mehr braucht es nicht, und mehr
-          sollte die App auch nicht können.</p>
+        <p class="search-hint">Damit legt Nupplo aus einem Fehler direkt ein
+          Issue an. Nimm einen <b>fein granulierten</b> Token nur für dieses
+          Repository, mit <b>„Issues: Read and write“</b> und sonst nichts.</p>
         <p class="search-hint" id="github-token-state"></p>
         <div id="github-token-input">
           <label for="github-token">Token</label>
           <input id="github-token" type="password" autocomplete="off"
-            placeholder="github_pat_…">
+                 placeholder="github_pat_…">
         </div>
         <div class="detail-row btn-grid" style="margin-top:8px">
           <button class="mini-btn add" id="btn-github-token">Token speichern</button>
@@ -1489,30 +1691,25 @@ sudo bash update.sh</pre>
       <h3>ℹ️ Quellen &amp; Rechtliches</h3>
       <p class="search-hint">Nupplo ist ein privates Hobby-Projekt ohne
         kommerzielle Absicht und läuft auf deinem eigenen Server.</p>
-      <p class="search-hint"><b>Daten &amp; Bilder</b> stammen von
+      <p class="search-hint"><b>Daten &amp; Bilder</b> kommen von
         <a href="https://rebrickable.com/" target="_blank" rel="noopener">Rebrickable</a>
         (Katalogsuche),
         <a href="https://www.bricklink.com/" target="_blank" rel="noopener">BrickLink</a>
         (Preise, Set-Inhalte, Bilder) und
         <a href="https://brickognize.com/" target="_blank" rel="noopener">Brickognize</a>
-        (Bilderkennung). Beim Abfotografieren wird das Foto zur Erkennung an
-        Brickognize übertragen. Für die Dienste gelten deren jeweilige
+        (Bilderkennung, dafür geht dein Foto an Brickognize). Es gelten deren
         Nutzungsbedingungen.</p>
-      <p class="search-hint"><b>Jedipedia</b> (optional, ausgeschaltet
-        voreingestellt): Das <b>ⓘ</b> neben Star-Wars-Figuren öffnet einen
-        Artikel der
+      <p class="search-hint"><b>Jedipedia</b> (freiwillig): Das <b>ⓘ</b>
+        öffnet einen Artikel der
         <a href="https://jedipedia.net/" target="_blank" rel="noopener noreferrer">Jedipedia</a>,
-        eines unabhängigen deutschsprachigen Fan-Wikis. Es wird nur verlinkt –
-        keine Inhalte abgerufen, übernommen oder gespeichert, und solange
-        niemand das Zeichen antippt, geht nichts dorthin. Welcher Artikel zu
-        welcher Figur gehört, wurde <b>einmalig</b> beim Wiki erfragt und
-        liegt als feste Liste bei; im Betrieb fragt Nupplo dort nichts.
-        Die Artikel stehen unter der GNU-FDL 1.3 und gehören ihren
-        Autoren.</p>
+        eines unabhängigen Fan-Wikis. Nupplo verlinkt nur und fragt dort im
+        Betrieb nichts ab; welcher Artikel zu welcher Figur gehört, liegt als
+        feste Liste bei. Die Artikel stehen unter der GNU-FDL 1.3 und gehören
+        ihren Autoren.</p>
       <div id="bricklink-rechtliches" hidden>
-        <p class="search-hint"><b>BrickLink.</b> Diese Instanz holt Preise und
-          Set-Inhalte über die BrickLink-API. Deren Nutzungsbedingungen
-          verlangen den folgenden Hinweis im Wortlaut:</p>
+        <p class="search-hint"><b>BrickLink.</b> Diese Instanz nutzt die
+          BrickLink-API. Deren Bedingungen verlangen diesen Hinweis im
+          Wortlaut:</p>
         <p class="search-hint" lang="en">The term &lsquo;BrickLink&rsquo; is a
           trademark of the LEGO Group BrickLink. This application uses the
           BrickLink API but is not endorsed or certified by LEGO BrickLink,
@@ -1530,21 +1727,17 @@ sudo bash update.sh</pre>
       <p class="search-hint"><b>Programm</b>:
         <a href="https://github.com/Melle79/nupplo" target="_blank" rel="noopener">Nupplo</a>
         unter MIT-Lizenz.</p>
-      <p class="search-hint"><b>Haftung.</b> Nupplo ist ein privates
-        Hobby-Projekt und wird „wie besehen“ bereitgestellt – ohne Gewähr für
-        Fehlerfreiheit, Verfügbarkeit oder Eignung für einen bestimmten
-        Zweck. Soweit gesetzlich zulässig, wird keine Haftung für Schäden aus
-        der Nutzung übernommen. Das betrifft vor allem drei Dinge:</p>
+      <p class="search-hint"><b>Haftung.</b> Nupplo wird „wie besehen“
+        bereitgestellt, ohne Gewähr. Soweit gesetzlich zulässig, wird keine
+        Haftung für Schäden aus der Nutzung übernommen. Vor allem:</p>
       <ul class="search-hint">
-        <li><b>Preise sind Anhaltspunkte, keine Bewertung.</b> Die Ø-Werte
-          kommen von BrickLink und schwanken. Sie taugen nicht als Grundlage
-          für Versicherungssummen, Verkaufsentscheidungen oder Angaben
-          gegenüber Behörden.</li>
-        <li><b>Die Erkennung kann sich irren.</b> Was Kamera und Suche
-          vorschlagen, ist ein Vorschlag – die Zuordnung prüfst du.</li>
-        <li><b>Deine Daten liegen bei dir.</b> Die App hilft beim Sichern,
-          aber Server, Platte und Sicherung gehören dir. Ein Backup, das
-          nie zurückgespielt wurde, ist keines.</li>
+        <li><b>Preise sind Anhaltspunkte, keine Bewertung.</b> Für
+          Versicherung, Verkauf oder Behörden taugen sie nicht.</li>
+        <li><b>Die Erkennung kann sich irren.</b> Was Nupplo vorschlägt,
+          prüfst du.</li>
+        <li><b>Deine Daten liegen bei dir.</b> Server, Platte und Sicherung
+          gehören dir. Eine Sicherung, die nie zurückgespielt wurde, ist
+          keine.</li>
       </ul>
       <p class="search-hint">Die zwingende Haftung – Vorsatz, grobe
         Fahrlässigkeit, Personenschäden und Produkthaftung – bleibt davon
@@ -1559,6 +1752,13 @@ sudo bash update.sh</pre>
     <button data-tab="scan" class="tab active">
       <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
       Scannen
+    </button>
+    <!-- Live-Scanner gleich unter Scannen, wie in der Mac-App (07.11.2026: „in der Menüleiste links, genau so wie in der
+         Mac-App“). Nur im Fenster von Nupplo für Windows; es öffnet
+         dieselbe Seite wie Scannen, aber im Live-Modus. -->
+    <button data-tab="live" class="tab nur-desktop" id="tab-live" hidden>
+      <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="2"/><path d="M16.24 7.76a6 6 0 0 1 0 8.49"/><path d="M7.76 16.24a6 6 0 0 1 0-8.49"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/><path d="M4.93 19.07a10 10 0 0 1 0-14.14"/></svg>
+      Live-Scanner
     </button>
     <button data-tab="collection" class="tab">
       <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="9" width="18" height="12" rx="2"/><path d="M7 9V7a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v2"/><path d="M8 5V4m8 1V4"/></svg>
@@ -1599,10 +1799,15 @@ sudo bash update.sh</pre>
 
 <button id="btn-nach-oben" class="nach-oben" hidden
         aria-label="Zum Anfang der Liste">↑</button>
+<div id="verbindung-hinweis" class="verbindung-hinweis" role="status" hidden>
+  <span class="verbindung-punkt" aria-hidden="true"></span>
+  <span><b id="verbindung-titel"></b><br><span id="verbindung-text" class="sub"></span></span>
+  <button id="btn-verbindung-jetzt" class="mini-btn">Jetzt versuchen</button>
+</div>
 <div id="toast" class="toast" hidden></div>
 <div id="lightbox" class="lightbox" hidden>
   <button id="lb-prev" class="lb-nav" aria-label="Vorheriges Bild">‹</button>
-  <img id="lightbox-img" alt="Großansicht">
+  <img id="lightbox-img" alt="Großansicht" referrerpolicy="no-referrer">
   <button id="lb-next" class="lb-nav" aria-label="Nächstes Bild">›</button>
   <span id="lb-count" class="lb-count"></span>
   <button id="lb-del" class="lb-del" hidden>🗑 Mein Foto entfernen</button>
@@ -1627,11 +1832,11 @@ sudo bash update.sh</pre>
     <input id="own-name" autocomplete="username" maxlength="60">
     <button id="btn-own-name" class="btn btn-outline">Benutzernamen ändern</button>
     <p id="own-name-error" class="error" hidden></p>
-    <label for="own-pass-current">Aktuelles Passwort</label>
-    <input id="own-pass-current" type="password" autocomplete="current-password">
-    <label for="own-pass-new">Neues Passwort (mind. 8 Zeichen)</label>
-    <input id="own-pass-new" type="password" autocomplete="new-password">
-    <button id="btn-own-pass" class="btn btn-primary">Passwort ändern</button>
+    <label for="own-pass-current" class="nur-server">Aktuelles Passwort</label>
+    <input id="own-pass-current" class="nur-server" type="password" autocomplete="current-password">
+    <label for="own-pass-new" class="nur-server">Neues Passwort (mind. 8 Zeichen)</label>
+    <input id="own-pass-new" class="nur-server" type="password" autocomplete="new-password">
+    <button id="btn-own-pass" class="btn btn-primary nur-server">Passwort ändern</button>
     <p id="own-pass-error" class="error" hidden></p>
 
     <div id="koppeln-block" hidden>
@@ -1650,12 +1855,12 @@ sudo bash update.sh</pre>
       <p id="koppeln-fehler" class="error" hidden></p>
     </div>
 
-    <hr class="profile-trenner">
-    <h4 class="profile-titel">🔐 Zwei-Faktor-Anmeldung</h4>
+    <hr class="profile-trenner nur-server">
+    <h4 class="profile-titel nur-server">🔐 Zwei-Faktor-Anmeldung</h4>
     <!-- Der Block zieht für den Assistenten-Schritt „Absichern" dorthin um
          und danach zurück (siehe `tfaBlockUmziehen`) – eine Oberfläche,
          nicht zwei. -->
-    <div id="tfa-heimat"><div id="tfa-block">
+    <div id="tfa-heimat" class="nur-server"><div id="tfa-block">
     <p class="search-hint" id="tfa-info"></p>
     <p class="search-hint tfa-extern" id="tfa-extern" hidden></p>
 
@@ -1696,7 +1901,7 @@ sudo bash update.sh</pre>
     <p id="tfa-error" class="error" hidden></p>
     </div></div>
 
-    <button id="btn-logout" class="btn btn-outline">Abmelden</button>
+    <button id="btn-logout" class="btn btn-outline nur-server">Abmelden</button>
   </div>
 </div>
 
@@ -1714,6 +1919,11 @@ sudo bash update.sh</pre>
   <div class="help-sheet figinfo-sheet" role="dialog" aria-label="Steckbrief">
     <div class="help-head">
       <h3 id="figinfo-head">Steckbrief</h3>
+      <span class="figinfo-folge">
+        <button id="btn-figinfo-zurueck" class="figinfo-pfeil" aria-label="Vorige" hidden>‹</button>
+        <span id="figinfo-zaehler" class="sub" hidden></span>
+        <button id="btn-figinfo-vor" class="figinfo-pfeil" aria-label="Nächste" hidden>›</button>
+      </span>
       <button id="btn-figinfo-close" class="help-close" aria-label="Schließen">✕</button>
     </div>
     <div id="figinfo-body"></div>
@@ -1757,9 +1967,11 @@ sudo bash update.sh</pre>
 
       <details class="help" id="help-keys">
         <summary>🔑 API-Schlüssel besorgen</summary>
-        <p>Scannen geht ohne Schlüssel. <b>Preise, Namenssuche und
-        Set-Inhalte</b> brauchen zwei kostenlose Zugänge – eintragen kann sie
-        nur der Admin unter <b>Mehr → API-Schlüssel</b>.</p>
+        <p>Scannen geht ohne Schlüssel, Preise auch: über den
+        Nupplo-Preisdienst. Ein eigener <b>BrickLink</b>-Zugang ist der
+        zweite Weg zu Preisen und bringt Set-Inhalte, <b>Rebrickable</b>
+        die Suche nach Sets und Teilen. Eintragen kann sie nur der Admin,
+        unter <b>Mehr → Preise</b> und <b>Mehr → Katalogsuche</b>.</p>
         <p><b>BrickLink</b> (Preise &amp; Set-Inhalte):</p>
         <ol>
           <li>Konto mit <b>eröffnetem Shop</b> – die Store-API steht nur
@@ -1772,8 +1984,7 @@ sudo bash update.sh</pre>
         <p><b>Rebrickable</b> (Suche nach Namen): Konto anlegen, unter
         <a href="https://rebrickable.com/api/" target="_blank" rel="noopener">Account → API</a>
         einen Key erzeugen.</p>
-        <p>Dann <b>„Verbindung testen"</b> – zwei grüne Haken, und die Preise
-        laufen von selbst ein.</p>
+        <p>Dann <b>„Verbindung testen"</b>. Grüne Haken heißen: läuft.</p>
       </details>
 
       <details class="help">
@@ -1785,7 +1996,7 @@ sudo bash update.sh</pre>
           <li><b>Sammlerprofi</b> 💼: zusätzlich Kaufpreise &amp; Gewinn,
             Einkaufslisten, Gesamtangebot, Verkaufsliste, Archiv, CSV-Import.
             Vergibt der Admin per „Profi"-Knopf.</li>
-          <li><b>Admin</b> 🔧: Benutzer, API-Schlüssel, Sicherung.</li>
+          <li><b>Admin</b> 🔧: Benutzer, Preise und Schlüssel, Sicherung.</li>
         </ul>
       </details>
 
