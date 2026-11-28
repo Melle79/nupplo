@@ -64,6 +64,15 @@ def test_drehscheibe_loest_auch_ohne_stillstand_aus():
     assert len(ausgeloest) == bildschirm.ANSICHTEN
 
 
+@pytest.fixture(autouse=True)
+def eigene_db(tmp_path, monkeypatch):
+    """Eigene Datenbank. Ohne sie hingen diese Tests davon ab, dass ein
+    früherer Test die gemeinsame Vorgabe-Datei angelegt hat – in der CI
+    nicht der Fall (28.11.2026)."""
+    monkeypatch.setattr(core, "DB_PATH", str(tmp_path / "bildschirm.db"))
+    core.init_db()
+
+
 @pytest.fixture
 def client(monkeypatch):
     monkeypatch.setenv("NUPPLO_DESKTOP", "1")
